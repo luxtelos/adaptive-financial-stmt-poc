@@ -10,6 +10,7 @@ import { ClerkProvider } from '@clerk/clerk-react'
 import { clerkConfig } from './config/clerk'
 import { SignInPage } from './pages/SignInPage'
 import { SignUpPage } from './pages/SignUpPage'
+import { OAuthCallbackPage } from './pages/OAuthCallbackPage'
 
 // Lazy load components that require authentication or external services
 const AuthenticatedApp = lazy(() => import('./components/AuthenticatedApp'))
@@ -323,6 +324,7 @@ function App() {
               <AuthenticatedApp />
             </Suspense>
           } />
+          <Route path="/oauth-callback" element={<OAuthCallbackPage />} />
           <Route path="/callback" element={
             <Suspense fallback={<Spinner size="xl" />}>
               <AuthenticatedApp />

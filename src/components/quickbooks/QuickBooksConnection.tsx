@@ -17,6 +17,7 @@ interface QuickBooksConnectionProps {
 
 export function QuickBooksConnection({ companyId }: QuickBooksConnectionProps) {
   const { toast } = useToast()
+  const [isDisconnecting, setIsDisconnecting] = React.useState(false)
   const {
     isConnected,
     lastSync,
@@ -42,18 +43,24 @@ export function QuickBooksConnection({ companyId }: QuickBooksConnectionProps) {
       return
     }
 
+    setIsDisconnecting(true)
     try {
       await disconnect()
       toast({
         title: 'Disconnected',
         description: 'QuickBooks has been disconnected',
       })
+      // Force a small delay to ensure state updates
+      setTimeout(() => {
+        setIsDisconnecting(false)
+      }, 100)
     } catch (error) {
       toast({
         title: 'Error',
         description: 'Failed to disconnect QuickBooks',
         variant: 'destructive',
       })
+      setIsDisconnecting(false)
     }
   }
 
@@ -93,7 +100,7 @@ export function QuickBooksConnection({ companyId }: QuickBooksConnectionProps) {
         </div>
       </CardHeader>
       <CardContent>
-        {isConnected ? (
+        {isConnected && !isDisconnecting ? (
           <div className="space-y-4">
             {lastSync && (
               <div className="text-sm text-gray-600">
@@ -111,6 +118,7 @@ export function QuickBooksConnection({ companyId }: QuickBooksConnectionProps) {
               onClick={handleDisconnect} 
               variant="outline"
               className="w-full"
+              disabled={isDisconnecting}
             >
               <CrossCircledIcon className="mr-2" />
               Disconnect QuickBooks
