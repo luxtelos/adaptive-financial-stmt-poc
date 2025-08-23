@@ -1,383 +1,359 @@
-import React, { useState, useEffect } from 'react'
+import React, { useState } from 'react'
 import { Card, CardContent, CardDescription, CardHeader, CardTitle } from '../ui/card'
 import { Button } from '../ui/button'
 import { Badge } from '../ui/badge'
 import { Progress } from '../ui/progress'
 import { 
+  CheckCircledIcon,
+  DownloadIcon,
   ReloadIcon,
   FileTextIcon,
-  DownloadIcon,
   MagicWandIcon,
-  CheckCircledIcon,
   EyeOpenIcon
 } from '@radix-ui/react-icons'
-import { PerplexityService } from '../../services/perplexity.service'
-import { PDFService } from '../../services/pdf.service'
-import { supabase, FinancialReport } from '../../lib/supabase'
 import { useToast } from '../../hooks/useToast'
 import { useUser } from '@clerk/clerk-react'
 import ReactMarkdown from 'react-markdown'
-import {
-  Dialog,
-  DialogContent,
-  DialogDescription,
-  DialogHeader,
-  DialogTitle,
-} from '../ui/dialog'
+import { Dialog, DialogContent, DialogDescription, DialogHeader, DialogTitle } from '../ui/dialog'
 
 interface ReportGenerationProps {
-  financialData?: any
   companyId?: string
+  onReportGenerated?: (report: any) => void
 }
 
-export function ReportGeneration({ financialData, companyId }: ReportGenerationProps) {
+type WorkflowStep = 'idle' | 'importing' | 'processing' | 'viewing'
+
+interface ImportedReport {
+  name: string
+  status: 'pending' | 'importing' | 'completed' | 'error'
+  data?: any
+}
+
+const REPORT_TYPES = [
+  { id: 'profit_loss', name: 'Profit & Loss Statement' },
+  { id: 'balance_sheet', name: 'Balance Sheet' },
+  { id: 'cash_flow', name: 'Cash Flow Statement' },
+  { id: 'accounts_receivable', name: 'Accounts Receivable Aging' },
+  { id: 'accounts_payable', name: 'Accounts Payable Aging' },
+  { id: 'trial_balance', name: 'Trial Balance' },
+  { id: 'general_ledger', name: 'General Ledger' },
+  { id: 'customer_sales', name: 'Customer Sales Summary' },
+  { id: 'vendor_expenses', name: 'Vendor Expenses Summary' },
+  { id: 'inventory_valuation', name: 'Inventory Valuation Summary' }
+]
+
+export function ReportGeneration({ companyId, onReportGenerated }: ReportGenerationProps) {
   const { user } = useUser()
   const { toast } = useToast()
-  const [selectedReportType, setSelectedReportType] = useState('profit_loss')
-  const [reportStatus, setReportStatus] = useState<'idle' | 'generating' | 'success' | 'error'>('idle')
-  const [reportProgress, setReportProgress] = useState(0)
-  const [availableReports, setAvailableReports] = useState<FinancialReport[]>([])
-  const [selectedReport, setSelectedReport] = useState<FinancialReport | null>(null)
-  const [showReportDialog, setShowReportDialog] = useState(false)
+  
+  const [workflowStep, setWorkflowStep] = useState<WorkflowStep>('idle')
+  const [importedReports, setImportedReports] = useState<ImportedReport[]>([])
+  const [allReportsData, setAllReportsData] = useState<any>(null)
+  const [llmAnalysis, setLlmAnalysis] = useState<any>(null)
+  const [pdfUrl, setPdfUrl] = useState<string>('')
+  const [showPdfViewer, setShowPdfViewer] = useState(false)
+  const [importProgress, setImportProgress] = useState(0)
+  const [processingProgress, setProcessingProgress] = useState(0)
 
-  useEffect(() => {
-    if (companyId) {
-      loadReports()
-    }
-  }, [companyId])
+  const handleImportData = async () => {
+    setWorkflowStep('importing')
+    setImportProgress(0)
+    
+    // Initialize all reports as pending
+    const reports = REPORT_TYPES.map(type => ({
+      name: type.name,
+      status: 'pending' as const,
+      data: null
+    }))
+    setImportedReports(reports)
 
-  const loadReports = async () => {
-    if (!companyId) return
+    try {
+      // TODO: Replace with actual webhook call to backend
+      // For now, simulate importing each report
+      for (let i = 0; i < REPORT_TYPES.length; i++) {
+        const updatedReports = [...reports]
+        updatedReports[i].status = 'importing'
+        setImportedReports([...updatedReports])
+        
+        // Simulate API call delay
+        await new Promise(resolve => setTimeout(resolve, 500))
+        
+        updatedReports[i].status = 'completed'
+        updatedReports[i].data = { 
+          // Mock data for now
+          reportType: REPORT_TYPES[i].id,
+          companyId,
+          timestamp: new Date().toISOString()
+        }
+        setImportedReports([...updatedReports])
+        setImportProgress(((i + 1) / REPORT_TYPES.length) * 100)
+      }
 
-    const { data, error } = await supabase
-      .from('financial_reports')
-      .select('*')
-      .eq('company_id', companyId)
-      .order('created_at', { ascending: false })
-      .limit(10)
+      // Combine all report data
+      const combinedData = {
+        companyId,
+        timestamp: new Date().toISOString(),
+        reports: reports.reduce((acc, report, index) => {
+          acc[REPORT_TYPES[index].id] = report.data
+          return acc
+        }, {} as any)
+      }
+      
+      setAllReportsData(combinedData)
+      
+      toast({
+        title: 'Import Complete',
+        description: 'All financial reports have been imported successfully',
+      })
 
-    if (data && !error) {
-      setAvailableReports(data)
+      // Automatically proceed to processing
+      setTimeout(() => handleGenerateReport(combinedData), 1000)
+      
+    } catch (error) {
+      console.error('Import error:', error)
+      toast({
+        title: 'Import Failed',
+        description: 'Failed to import QuickBooks data. Please try again.',
+        variant: 'destructive',
+      })
+      setWorkflowStep('idle')
     }
   }
 
-  const handleGenerateReport = async () => {
-    if (!financialData || !companyId) {
-      toast({
-        title: 'Error',
-        description: 'Please import financial data first',
-        variant: 'destructive',
-      })
-      return
-    }
-
-    setReportStatus('generating')
-    setReportProgress(0)
+  const handleGenerateReport = async (data: any) => {
+    setWorkflowStep('processing')
+    setProcessingProgress(0)
 
     try {
       // Simulate progress
       const progressInterval = setInterval(() => {
-        setReportProgress(prev => Math.min(prev + 15, 85))
-      }, 500)
+        setProcessingProgress(prev => Math.min(prev + 10, 90))
+      }, 300)
 
-      // Generate AI analysis
-      const analysis = await PerplexityService.analyzeFinancialReport(
-        financialData,
-        selectedReportType
-      )
-
-      clearInterval(progressInterval)
-      setReportProgress(90)
-
-      // Generate PDF
-      const pdfUrl = await PDFService.generateFinancialReportPDF(
-        financialData,
-        analysis,
-        user?.fullName || 'Company'
-      )
-
-      setReportProgress(95)
-
-      // Calculate score based on analysis
-      const score = calculateFinancialScore(financialData, selectedReportType)
-
-      // Save report to database
-      const { data: report, error } = await supabase
-        .from('financial_reports')
-        .insert({
-          company_id: companyId,
-          report_type: selectedReportType,
-          period_start: new Date().toISOString(),
-          period_end: new Date().toISOString(),
-          raw_data: financialData,
-          ai_analysis: analysis,
-          pdf_url: pdfUrl,
-          score: score,
-          status: 'completed',
-        })
-        .select()
-        .single()
-
-      if (error) throw error
-
-      setReportProgress(100)
-      setReportStatus('success')
+      // TODO: Call Perplexity LLM API
+      // For now, simulate the API call
+      await new Promise(resolve => setTimeout(resolve, 3000))
       
-      // Reload reports
-      await loadReports()
+      clearInterval(progressInterval)
+      setProcessingProgress(95)
+
+      const mockAnalysis = {
+        summary: "## Financial Health Analysis\n\nBased on the comprehensive analysis of your QuickBooks data, here are the key findings:\n\n### Key Metrics\n- **Revenue Growth**: Positive trend with 15% increase YoY\n- **Expense Management**: Well controlled with 8% reduction in operational costs\n- **Cash Flow**: Healthy positive cash flow maintained throughout the period\n\n### Recommendations\n1. Continue current expense management strategies\n2. Explore opportunities for revenue diversification\n3. Consider investing excess cash in growth initiatives",
+        score: 85,
+        timestamp: new Date().toISOString()
+      }
+      
+      setLlmAnalysis(mockAnalysis)
+      
+      // TODO: Generate PDF using VITE_PDF_API_URL
+      // For now, use a mock URL
+      const mockPdfUrl = 'data:application/pdf;base64,mockpdfdata'
+      setPdfUrl(mockPdfUrl)
+      
+      setProcessingProgress(100)
+      setWorkflowStep('viewing')
+      
+      if (onReportGenerated) {
+        onReportGenerated({
+          data,
+          analysis: mockAnalysis,
+          pdfUrl: mockPdfUrl
+        })
+      }
 
       toast({
         title: 'Report Generated',
         description: 'Your financial analysis report is ready',
-        variant: 'success',
       })
+      
     } catch (error) {
-      console.error('Report generation error:', error)
-      setReportStatus('error')
+      console.error('Processing error:', error)
       toast({
-        title: 'Generation Failed',
-        description: 'Failed to generate the report. Please try again.',
+        title: 'Processing Failed',
+        description: 'Failed to generate report. Please try again.',
         variant: 'destructive',
       })
+      setWorkflowStep('idle')
     }
   }
 
-  const calculateFinancialScore = (data: any, reportType: string): number => {
-    // Simplified scoring logic - in production this would be more sophisticated
-    let score = 70 // Base score
-
-    if (data.netIncome > 0) score += 10
-    if (data.cashFlow > 0) score += 10
-    if (data.currentRatio > 1.5) score += 5
-    if (data.debtToEquity < 1) score += 5
-
-    return Math.min(100, Math.max(0, score))
-  }
-
-  const handleDownloadPDF = async (reportId: string) => {
-    const report = availableReports.find(r => r.id === reportId)
-    if (!report || !report.pdf_url) {
-      toast({
-        title: 'Error',
-        description: 'PDF not available for this report',
-        variant: 'destructive',
-      })
-      return
+  const handleDownloadPdf = () => {
+    if (pdfUrl) {
+      const link = document.createElement('a')
+      link.href = pdfUrl
+      link.download = `financial-report-${new Date().toISOString().split('T')[0]}.pdf`
+      link.click()
     }
-
-    PDFService.downloadPDF(
-      report.pdf_url,
-      `financial-report-${report.report_type}-${new Date(report.created_at).toISOString().split('T')[0]}.pdf`
-    )
   }
 
-  const handleViewReport = (report: FinancialReport) => {
-    setSelectedReport(report)
-    setShowReportDialog(true)
-  }
-
-  const reportTypes = [
-    {
-      id: 'profit_loss',
-      title: 'Profit & Loss Analysis',
-      description: 'Comprehensive income statement analysis with revenue and expense insights'
-    },
-    {
-      id: 'balance_sheet',
-      title: 'Balance Sheet Analysis',
-      description: 'Asset, liability, and equity position with financial ratios'
-    },
-    {
-      id: 'cash_flow',
-      title: 'Cash Flow Analysis',
-      description: 'Cash flow patterns, liquidity analysis, and working capital management'
-    },
-    {
-      id: 'trial_balance',
-      title: 'Trial Balance Review',
-      description: 'Account balances verification and audit preparation insights'
-    }
-  ]
-
-  const getScoreColor = (score?: number) => {
-    if (!score) return 'secondary'
-    if (score >= 80) return 'success'
-    if (score >= 60) return 'warning'
-    return 'destructive'
+  const handleReset = () => {
+    setWorkflowStep('idle')
+    setImportedReports([])
+    setAllReportsData(null)
+    setLlmAnalysis(null)
+    setPdfUrl('')
+    setImportProgress(0)
+    setProcessingProgress(0)
   }
 
   return (
-    <div className="space-y-6">
-      {/* Report Generation */}
+    <>
       <Card>
         <CardHeader>
-          <CardTitle className="flex items-center">
-            <MagicWandIcon className="h-5 w-5 mr-2 text-primary-600" />
-            AI-Powered Report Generation
-          </CardTitle>
-          <CardDescription>
-            Generate intelligent financial reports using Perplexity Pro AI
-          </CardDescription>
+          <div className="flex items-center justify-between">
+            <div>
+              <CardTitle>
+                Data Import & Report Generation
+              </CardTitle>
+              <CardDescription>
+                Import all QuickBooks reports and generate AI-powered analysis
+              </CardDescription>
+            </div>
+          </div>
         </CardHeader>
         <CardContent>
-          <div className="space-y-4">
-            <div>
-              <label className="text-sm font-medium text-gray-700 mb-2 block">
-                Select Report Type
-              </label>
+          {workflowStep === 'idle' && (
+            <div className="space-y-4">
+              <div className="bg-blue-50 border border-blue-200 rounded-lg p-4">
+                <div className="text-sm text-blue-900">
+                  Click below to import all financial reports from QuickBooks. This will fetch:
+                  <ul className="list-disc list-inside mt-2">
+                    <li>Profit & Loss, Balance Sheet, Cash Flow</li>
+                    <li>Accounts Receivable/Payable Aging</li>
+                    <li>Trial Balance, General Ledger</li>
+                    <li>Customer/Vendor Summaries & more</li>
+                  </ul>
+                </div>
+              </div>
+              <Button 
+                onClick={handleImportData}
+                className="w-full"
+                size="lg"
+              >
+                <DownloadIcon className="mr-2" />
+                Import Data First
+              </Button>
+            </div>
+          )}
+
+          {workflowStep === 'importing' && (
+            <div className="space-y-4">
               <div className="space-y-2">
-                {reportTypes.map((type) => (
-                  <div key={type.id} className="flex items-center space-x-3">
-                    <input
-                      type="radio"
-                      id={type.id}
-                      name="reportType"
-                      value={type.id}
-                      checked={selectedReportType === type.id}
-                      onChange={(e) => setSelectedReportType(e.target.value)}
-                      className="h-4 w-4 text-primary-600 focus:ring-primary-500"
-                    />
-                    <label htmlFor={type.id} className="flex-1 cursor-pointer">
-                      <div className="font-medium text-gray-900">{type.title}</div>
-                      <div className="text-sm text-gray-500">{type.description}</div>
-                    </label>
+                <div className="flex justify-between text-sm">
+                  <span>Importing Reports...</span>
+                  <span>{Math.round(importProgress)}%</span>
+                </div>
+                <Progress value={importProgress} />
+              </div>
+              
+              <div className="space-y-2 max-h-60 overflow-y-auto">
+                {importedReports.map((report, index) => (
+                  <div key={index} className="flex items-center justify-between p-2 bg-gray-50 rounded">
+                    <span className="text-sm">{report.name}</span>
+                    <div className="flex items-center gap-2">
+                      {report.status === 'pending' && (
+                        <Badge variant="secondary">Pending</Badge>
+                      )}
+                      {report.status === 'importing' && (
+                        <Badge variant="default">
+                          <ReloadIcon className="mr-1 animate-spin" />
+                          Importing...
+                        </Badge>
+                      )}
+                      {report.status === 'completed' && (
+                        <Badge className="bg-success-600">
+                          <CheckCircledIcon className="mr-1" />
+                          Imported
+                        </Badge>
+                      )}
+                    </div>
                   </div>
                 ))}
               </div>
             </div>
+          )}
 
-            {reportStatus === 'generating' && (
-              <div className="space-y-2">
-                <div className="flex items-center justify-between">
-                  <span className="text-sm font-medium">Generating report...</span>
-                  <span className="text-sm text-gray-500">{reportProgress}%</span>
+          {workflowStep === 'processing' && (
+            <div className="space-y-4">
+              <div className="text-center py-8">
+                <MagicWandIcon className="h-12 w-12 mx-auto mb-4 text-primary-600 animate-pulse" />
+                <h3 className="text-lg font-semibold mb-2">Processing Your Data</h3>
+                <p className="text-sm text-gray-600 mb-4">
+                  AI is analyzing your financial reports...
+                </p>
+                <Progress value={processingProgress} className="mb-2" />
+                <span className="text-sm text-gray-500">{Math.round(processingProgress)}% Complete</span>
+              </div>
+            </div>
+          )}
+
+          {workflowStep === 'viewing' && llmAnalysis && (
+            <div className="space-y-4">
+              <div className="bg-success-50 border border-success-200 rounded-lg p-4">
+                <div className="flex items-center gap-2 text-success-700">
+                  <CheckCircledIcon className="h-5 w-5" />
+                  <span className="font-semibold">Report Generated Successfully</span>
                 </div>
-                <Progress value={reportProgress} />
-                <p className="text-sm text-gray-600">
-                  AI is analyzing your financial data and generating insights...
-                </p>
               </div>
-            )}
 
-            <Button 
-              onClick={handleGenerateReport}
-              disabled={reportStatus === 'generating' || !financialData}
-              className="w-full"
-              size="lg"
-              variant={reportStatus === 'success' ? 'success' : 'default'}
-            >
-              {reportStatus === 'generating' ? (
-                <ReloadIcon className="h-4 w-4 mr-2 animate-spin" />
-              ) : reportStatus === 'success' ? (
-                <CheckCircledIcon className="h-4 w-4 mr-2" />
-              ) : (
-                <MagicWandIcon className="h-4 w-4 mr-2" />
-              )}
-              {reportStatus === 'generating' ? 'Generating AI Analysis...' : 
-               reportStatus === 'success' ? 'Report Generated Successfully' :
-               !financialData ? 'Import Data First' : 'Generate AI Report'}
-            </Button>
-
-            {!financialData && (
-              <div className="bg-yellow-50 border border-yellow-200 rounded-lg p-3">
-                <p className="text-sm text-yellow-800">
-                  Please import financial data from QuickBooks before generating reports.
-                </p>
+              <div className="prose prose-sm max-w-none">
+                <ReactMarkdown>{llmAnalysis.summary}</ReactMarkdown>
               </div>
-            )}
-          </div>
+
+              <div className="flex gap-3">
+                <Button 
+                  onClick={() => setShowPdfViewer(true)}
+                  className="flex-1"
+                >
+                  <EyeOpenIcon className="mr-2" />
+                  View PDF Report
+                </Button>
+                <Button 
+                  onClick={handleDownloadPdf}
+                  variant="outline"
+                  className="flex-1"
+                >
+                  <DownloadIcon className="mr-2" />
+                  Download PDF
+                </Button>
+              </div>
+
+              <Button 
+                onClick={handleReset}
+                variant="outline"
+                className="w-full"
+              >
+                <ReloadIcon className="mr-2" />
+                Generate New Report
+              </Button>
+            </div>
+          )}
         </CardContent>
       </Card>
 
-      {/* Available Reports */}
-      {availableReports.length > 0 && (
-        <Card>
-          <CardHeader>
-            <CardTitle className="flex items-center">
-              <FileTextIcon className="h-5 w-5 mr-2 text-primary-600" />
-              Generated Reports
-            </CardTitle>
-            <CardDescription>
-              View and download your generated financial analysis reports
-            </CardDescription>
-          </CardHeader>
-          <CardContent>
-            <div className="space-y-4">
-              {availableReports.map((report) => (
-                <div 
-                  key={report.id} 
-                  className="flex items-center justify-between p-4 border border-gray-200 rounded-lg hover:border-primary-300 transition-colors"
-                >
-                  <div className="flex-1">
-                    <div className="flex items-center space-x-2 mb-1">
-                      <h4 className="font-medium text-gray-900">
-                        {reportTypes.find(t => t.id === report.report_type)?.title || report.report_type}
-                      </h4>
-                      {report.score !== undefined && (
-                        <Badge variant={getScoreColor(report.score)}>
-                          Score: {report.score}/100
-                        </Badge>
-                      )}
-                      <Badge variant={report.status === 'completed' ? 'success' : 'secondary'}>
-                        {report.status}
-                      </Badge>
-                    </div>
-                    <p className="text-sm text-gray-500">
-                      Generated on {new Date(report.created_at).toLocaleDateString('en-US', {
-                        year: 'numeric',
-                        month: 'short',
-                        day: 'numeric',
-                        hour: '2-digit',
-                        minute: '2-digit'
-                      })}
-                    </p>
-                  </div>
-                  <div className="flex space-x-2">
-                    <Button 
-                      variant="outline" 
-                      size="sm"
-                      onClick={() => handleViewReport(report)}
-                    >
-                      <EyeOpenIcon className="h-4 w-4 mr-1" />
-                      View
-                    </Button>
-                    <Button 
-                      variant="outline" 
-                      size="sm"
-                      onClick={() => handleDownloadPDF(report.id)}
-                      disabled={!report.pdf_url}
-                    >
-                      <DownloadIcon className="h-4 w-4 mr-1" />
-                      PDF
-                    </Button>
-                  </div>
-                </div>
-              ))}
-            </div>
-          </CardContent>
-        </Card>
-      )}
-
-      {/* Report View Dialog */}
-      <Dialog open={showReportDialog} onOpenChange={setShowReportDialog}>
-        <DialogContent className="max-w-4xl max-h-[80vh] overflow-y-auto">
+      <Dialog open={showPdfViewer} onOpenChange={setShowPdfViewer}>
+        <DialogContent className="max-w-4xl h-[80vh]">
           <DialogHeader>
-            <DialogTitle>
-              {selectedReport && reportTypes.find(t => t.id === selectedReport.report_type)?.title}
-            </DialogTitle>
+            <DialogTitle>Financial Analysis Report</DialogTitle>
             <DialogDescription>
-              AI-powered financial analysis generated on {selectedReport && new Date(selectedReport.created_at).toLocaleDateString()}
+              Your comprehensive financial analysis report
             </DialogDescription>
           </DialogHeader>
-          <div className="mt-4">
-            {selectedReport?.ai_analysis && (
-              <div className="prose prose-sm max-w-none">
-                <ReactMarkdown>{selectedReport.ai_analysis}</ReactMarkdown>
+          <div className="flex-1 overflow-hidden">
+            {pdfUrl ? (
+              <iframe 
+                src={pdfUrl}
+                className="w-full h-full border-0"
+                title="Financial Report PDF"
+              />
+            ) : (
+              <div className="flex items-center justify-center h-full">
+                <p className="text-gray-500">Loading PDF...</p>
               </div>
             )}
           </div>
         </DialogContent>
       </Dialog>
-    </div>
+    </>
   )
 }

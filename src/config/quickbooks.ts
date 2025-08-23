@@ -13,7 +13,7 @@ export const quickbooksConfig = {
     'address',
   ],
   webhookUrl: import.meta.env.VITE_QUICKBOOKS_WEBHOOK_URL,
-  authorizationUrl: 'https://appcenter.intuit.com/connect/oauth2',
-  tokenUrl: 'https://oauth.platform.intuit.com/oauth2/v1/tokens/bearer',
-  revokeUrl: 'https://developer.api.intuit.com/v2/oauth2/tokens/revoke',
+  authorizationUrl: import.meta.env.VITE_QBO_AUTH_BASE_URL,
+  tokenUrl: import.meta.env.VITE_QBO_TOKEN_URL,
+  revokeUrl: import.meta.env.VITE_QBO_REVOKE_URL,
 };

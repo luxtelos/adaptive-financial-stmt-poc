@@ -48,7 +48,7 @@ function StatCard({ title, value, change, changeType, icon, color = 'default' }:
 }
 
 interface DashboardStatsProps {
-  stats: {
+  stats?: {
     totalRevenue: number
     revenueChange: number
     totalExpenses: number
@@ -60,38 +60,52 @@ interface DashboardStatsProps {
   }
 }
 
-export function DashboardStats({ stats }: DashboardStatsProps) {
+export function DashboardStats({ stats }: DashboardStatsProps = {}) {
+  // Default stats when no data is available
+  const defaultStats = {
+    totalRevenue: 0,
+    revenueChange: 0,
+    totalExpenses: 0,
+    expenseChange: 0,
+    netIncome: 0,
+    netIncomeChange: 0,
+    healthScore: 0,
+    lastUpdated: new Date().toISOString()
+  }
+
+  const displayStats = stats || defaultStats
+
   return (
     <div className="grid grid-cols-1 md:grid-cols-2 lg:grid-cols-4 gap-6 mb-8">
       <StatCard
         title="Total Revenue"
-        value={formatCurrency(stats.totalRevenue)}
-        change={stats.revenueChange}
-        changeType={stats.revenueChange >= 0 ? 'increase' : 'decrease'}
+        value={formatCurrency(displayStats.totalRevenue)}
+        change={displayStats.revenueChange}
+        changeType={displayStats.revenueChange >= 0 ? 'increase' : 'decrease'}
         icon={<DollarSign className="h-4 w-4" />}
         color="success"
       />
       <StatCard
         title="Total Expenses"
-        value={formatCurrency(stats.totalExpenses)}
-        change={stats.expenseChange}
-        changeType={stats.expenseChange >= 0 ? 'increase' : 'decrease'}
+        value={formatCurrency(displayStats.totalExpenses)}
+        change={displayStats.expenseChange}
+        changeType={displayStats.expenseChange >= 0 ? 'increase' : 'decrease'}
         icon={<TrendingDown className="h-4 w-4" />}
         color="error"
       />
       <StatCard
         title="Net Income"
-        value={formatCurrency(stats.netIncome)}
-        change={stats.netIncomeChange}
-        changeType={stats.netIncomeChange >= 0 ? 'increase' : 'decrease'}
+        value={formatCurrency(displayStats.netIncome)}
+        change={displayStats.netIncomeChange}
+        changeType={displayStats.netIncomeChange >= 0 ? 'increase' : 'decrease'}
         icon={<TrendingUp className="h-4 w-4" />}
-        color={stats.netIncome >= 0 ? 'success' : 'error'}
+        color={displayStats.netIncome >= 0 ? 'success' : 'error'}
       />
       <StatCard
         title="Health Score"
-        value={`${stats.healthScore}/100`}
+        value={`${displayStats.healthScore}/100`}
         icon={<CalendarIcon className="h-4 w-4" />}
-        color={stats.healthScore >= 80 ? 'success' : stats.healthScore >= 60 ? 'warning' : 'error'}
+        color={displayStats.healthScore >= 80 ? 'success' : displayStats.healthScore >= 60 ? 'warning' : 'error'}
       />
     </div>
   )

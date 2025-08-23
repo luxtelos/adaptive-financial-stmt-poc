@@ -1,18 +1,22 @@
-import React, { useState, useEffect, lazy, Suspense } from 'react'
-import { BrowserRouter as Router, Routes, Route, Navigate } from 'react-router-dom'
+import React, { lazy, Suspense } from 'react'
+import { BrowserRouter as Router, Routes, Route, Navigate, useNavigate } from 'react-router-dom'
 import { Card, CardContent, CardDescription, CardHeader, CardTitle } from './components/ui/card'
 import { Button } from './components/ui/button'
 import { Toaster } from './components/ui/toaster'
 import { DemoHeader } from './components/layout/Header'
 import { Badge } from './components/ui/badge'
 import { Spinner } from './components/ui/spinner'
+import { ClerkProvider } from '@clerk/clerk-react'
+import { clerkConfig } from './config/clerk'
+import { SignInPage } from './pages/SignInPage'
+import { SignUpPage } from './pages/SignUpPage'
 
 // Lazy load components that require authentication or external services
 const AuthenticatedApp = lazy(() => import('./components/AuthenticatedApp'))
 
 // Landing Page Component (No external dependencies)
 function LandingPage() {
-  const [mode, setMode] = useState<'landing' | 'setup' | 'demo' | 'app'>('landing')
+  const navigate = useNavigate()
 
   // Check if app is configured (but don't initialize services)
   const checkConfiguration = () => {
@@ -30,30 +34,10 @@ function LandingPage() {
 
   const handleGetStarted = () => {
     if (checkConfiguration()) {
-      setMode('app')
+      navigate('/sign-in')
     } else {
-      setMode('setup')
+      navigate('/setup')
     }
-  }
-
-  if (mode === 'app') {
-    return (
-      <Suspense fallback={
-        <div className="min-h-screen bg-gradient-to-br from-blue-50 to-indigo-100 flex items-center justify-center">
-          <Spinner size="xl" />
-        </div>
-      }>
-        <AuthenticatedApp />
-      </Suspense>
-    )
-  }
-
-  if (mode === 'demo') {
-    return <DemoMode onBack={() => setMode('landing')} />
-  }
-
-  if (mode === 'setup') {
-    return <SetupGuide onDemo={() => setMode('demo')} onBack={() => setMode('landing')} />
   }
 
   // Default Landing Page
@@ -89,7 +73,7 @@ function LandingPage() {
               <Button 
                 size="lg"
                 variant="outline"
-                onClick={() => setMode('demo')}
+                onClick={() => navigate('/demo')}
                 className="px-8"
               >
                 Try Demo
@@ -147,7 +131,8 @@ function LandingPage() {
 }
 
 // Setup Guide Component
-function SetupGuide({ onDemo, onBack }: { onDemo: () => void, onBack: () => void }) {
+function SetupGuide() {
+  const navigate = useNavigate()
   const missingConfigs = []
   
   const clerkKey = import.meta.env.VITE_CLERK_PUBLISHABLE_KEY
@@ -198,10 +183,10 @@ function SetupGuide({ onDemo, onBack }: { onDemo: () => void, onBack: () => void
             </div>
 
             <div className="flex gap-3">
-              <Button onClick={onBack} variant="outline">
+              <Button onClick={() => navigate('/')} variant="outline">
                 Back
               </Button>
-              <Button onClick={onDemo}>
+              <Button onClick={() => navigate('/demo')}>
                 Continue with Demo
               </Button>
             </div>
@@ -213,7 +198,8 @@ function SetupGuide({ onDemo, onBack }: { onDemo: () => void, onBack: () => void
 }
 
 // Demo Mode Component (No external dependencies)
-function DemoMode({ onBack }: { onBack: () => void }) {
+function DemoMode() {
+  const navigate = useNavigate()
   return (
     <div className="min-h-screen bg-gradient-to-br from-blue-50 to-indigo-100">
       <DemoHeader />
@@ -282,7 +268,7 @@ function DemoMode({ onBack }: { onBack: () => void }) {
         </div>
 
         <div className="mt-8 text-center">
-          <Button onClick={onBack} variant="outline">
+          <Button onClick={() => navigate('/')} variant="outline">
             Back to Home
           </Button>
         </div>
@@ -293,12 +279,58 @@ function DemoMode({ onBack }: { onBack: () => void }) {
 
 // Main App Component
 function App() {
+  const clerkPubKey = clerkConfig.publishableKey
+  const isConfigured = clerkPubKey && clerkPubKey !== 'pk_test_your_clerk_publishable_key'
+
+  if (!isConfigured) {
+    // If Clerk is not configured, show a simple router with setup instructions
+    return (
+      <Router>
+        <Routes>
+          <Route path="/" element={<LandingPage />} />
+          <Route path="/setup" element={<SetupGuide />} />
+          <Route path="/demo" element={<DemoMode />} />
+          <Route path="*" element={<Navigate to="/" replace />} />
+        </Routes>
+        <Toaster />
+      </Router>
+    )
+  }
+
+  // If Clerk is configured, wrap everything in ClerkProvider
   return (
     <Router>
-      <Routes>
-        <Route path="/" element={<LandingPage />} />
-        <Route path="*" element={<Navigate to="/" replace />} />
-      </Routes>
+      <ClerkProvider 
+        publishableKey={clerkPubKey} 
+        appearance={clerkConfig.appearance}
+        signInUrl="/sign-in"
+        signUpUrl="/sign-up"
+        signInFallbackRedirectUrl="/dashboard"
+        signUpFallbackRedirectUrl="/dashboard"
+      >
+        <Routes>
+          <Route path="/" element={<LandingPage />} />
+          <Route path="/setup" element={<SetupGuide />} />
+          <Route path="/demo" element={<DemoMode />} />
+          <Route path="/sign-in" element={<SignInPage />} />
+          <Route path="/sign-up" element={<SignUpPage />} />
+          <Route path="/dashboard/*" element={
+            <Suspense fallback={
+              <div className="min-h-screen bg-gradient-to-br from-blue-50 to-indigo-100 flex items-center justify-center">
+                <Spinner size="xl" />
+              </div>
+            }>
+              <AuthenticatedApp />
+            </Suspense>
+          } />
+          <Route path="/callback" element={
+            <Suspense fallback={<Spinner size="xl" />}>
+              <AuthenticatedApp />
+            </Suspense>
+          } />
+          <Route path="*" element={<Navigate to="/" replace />} />
+        </Routes>
+      </ClerkProvider>
       <Toaster />
     </Router>
   )
