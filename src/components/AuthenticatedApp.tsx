@@ -1,15 +1,18 @@
 import React, { useState, useEffect } from 'react'
-import { Routes, Route, Navigate } from 'react-router-dom'
+import { Routes, Route, Navigate, useSearchParams } from 'react-router-dom'
 import { useUser, SignedIn, SignedOut, RedirectToSignIn } from '@clerk/clerk-react'
 import { Header } from './layout/Header'
 import { QuickBooksConnection } from './quickbooks/QuickBooksConnection'
 import { ReportGeneration } from './reports/ReportGeneration'
 import { useQBOServices } from '../lib/supabase-clerk'
 import { useQuickBooks } from '../hooks/useQuickBooks'
+import { useToast } from '../hooks/use-toast'
 
 // Main Dashboard Component
 function Dashboard() {
   const { user } = useUser()
+  const [searchParams, setSearchParams] = useSearchParams()
+  const { toast } = useToast()
   const [financialData, setFinancialData] = useState<any>(null)
   
   // Use the QBO services which include user sync
@@ -22,7 +25,28 @@ function Dashboard() {
     if (user) {
       syncUserData()
     }
-  }, [user])
+    
+    // Check for connection status in URL params
+    const connectionStatus = searchParams.get('qbo_connection')
+    if (connectionStatus) {
+      if (connectionStatus === 'success') {
+        toast({
+          title: 'QuickBooks Connected',
+          description: 'Your QuickBooks account has been successfully connected.',
+          variant: 'success',
+        })
+      } else if (connectionStatus === 'failed') {
+        toast({
+          title: 'Connection Failed',
+          description: 'Failed to connect your QuickBooks account. Please try again.',
+          variant: 'destructive',
+        })
+      }
+      // Remove the parameter from URL after showing the toast
+      searchParams.delete('qbo_connection')
+      setSearchParams(searchParams)
+    }
+  }, [user, searchParams, setSearchParams, toast])
 
   const syncUserData = async () => {
     if (!user) return
