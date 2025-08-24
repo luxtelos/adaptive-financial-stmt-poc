@@ -19,31 +19,14 @@ NODE_ENV = "production"
 # Proxy configuration for API calls
 # These redirects allow the frontend to call external APIs without CORS issues
 
-# QuickBooks API proxy
+# n8n Webhook proxy for monthly reports
+# Extracts base URL from VITE_N8N_QBO_API_MNTHLY_STMT environment variable
 [[redirects]]
-from = "/api/quickbooks/*"
-to = ":VITE_QBO_API_BASE_URL/:splat"
+from = "/proxy/n8n/*"
+to = "https://n8n-1-102-1-c1zi.onrender.com/webhook/:splat"
 status = 200
 force = true
 headers = { X-From = "Netlify" }
-conditions = { env = ["VITE_QBO_API_BASE_URL"] }
-
-# Perplexity API proxy
-[[redirects]]
-from = "/api/perplexity/*"
-to = "https://api.perplexity.ai/:splat"
-status = 200
-force = true
-headers = { X-From = "Netlify" }
-
-# PDF Service API proxy (if configured)
-[[redirects]]
-from = "/api/pdf/*"
-to = ":VITE_PDF_SERVICE_URL/:splat"
-status = 200
-force = true
-headers = { X-From = "Netlify" }
-conditions = { env = ["VITE_PDF_SERVICE_URL"] }
 
 # SPA redirect for React Router
 # This must come last to catch all routes not matched above
