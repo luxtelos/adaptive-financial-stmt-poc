@@ -417,140 +417,51 @@ export class DataTransformService {
   /**
    * Calculate comprehensive financial metrics
    */
-  private static calculateFinancialMetrics(
+  /**
+   * REMOVED: calculateFinancialMetrics - NO KPI CALCULATIONS
+   * Only data normalization allowed - LLM handles all KPI calculations
+   */
+  private static normalizeFinancialDataOnly(
     pl: ProfitLossStatement,
     bs: BalanceSheetStatement,
     cf: CashFlowStatement
   ) {
+    // Return raw normalized data only - NO CALCULATIONS
     return {
-      liquidityRatios: {
-        currentRatio: bs.liabilities.current.total > 0 
-          ? bs.assets.current.total / bs.liabilities.current.total 
-          : 0,
-        quickRatio: bs.liabilities.current.total > 0 
-          ? (bs.assets.current.total - bs.assets.current.inventory) / bs.liabilities.current.total 
-          : 0,
-        cashRatio: bs.liabilities.current.total > 0 
-          ? bs.assets.current.cash / bs.liabilities.current.total 
-          : 0,
-        workingCapital: bs.assets.current.total - bs.liabilities.current.total
-      },
-      
-      profitabilityRatios: {
-        grossProfitMargin: pl.revenue.total > 0 
-          ? (pl.grossProfit / pl.revenue.total) * 100 
-          : 0,
-        operatingMargin: pl.revenue.total > 0 
-          ? (pl.operatingIncome / pl.revenue.total) * 100 
-          : 0,
-        netProfitMargin: pl.revenue.total > 0 
-          ? (pl.netIncome / pl.revenue.total) * 100 
-          : 0,
-        returnOnAssets: bs.assets.totalAssets > 0 
-          ? (pl.netIncome / bs.assets.totalAssets) * 100 
-          : 0,
-        returnOnEquity: bs.equity.total > 0 
-          ? (pl.netIncome / bs.equity.total) * 100 
-          : 0,
-        ebitda: pl.operatingIncome, // Simplified - add D&A
-        ebitdaMargin: pl.revenue.total > 0 
-          ? (pl.operatingIncome / pl.revenue.total) * 100 
-          : 0
-      },
-      
-      efficiencyRatios: {
-        assetTurnover: bs.assets.totalAssets > 0 
-          ? pl.revenue.total / bs.assets.totalAssets 
-          : 0,
-        inventoryTurnover: bs.assets.current.inventory > 0 
-          ? pl.costOfGoodsSold.total / bs.assets.current.inventory 
-          : 0,
-        receivablesTurnover: bs.assets.current.accountsReceivable > 0 
-          ? pl.revenue.total / bs.assets.current.accountsReceivable 
-          : 0,
-        payablesTurnover: bs.liabilities.current.accountsPayable > 0 
-          ? pl.costOfGoodsSold.total / bs.liabilities.current.accountsPayable 
-          : 0,
-        cashConversionCycle: 0 // Calculate based on above
-      },
-      
-      leverageRatios: {
-        debtToEquity: bs.equity.total > 0 
-          ? bs.liabilities.totalLiabilities / bs.equity.total 
-          : 0,
-        debtToAssets: bs.assets.totalAssets > 0 
-          ? bs.liabilities.totalLiabilities / bs.assets.totalAssets 
-          : 0,
-        interestCoverage: 0, // Need interest expense
-        debtServiceCoverage: 0 // Need debt service details
-      },
-      
-      growthMetrics: {
-        revenueGrowthRate: 0, // Calculate with previous period
-        profitGrowthRate: 0,
-        assetGrowthRate: 0,
-        customerGrowthRate: undefined
+      // Raw data for LLM to calculate KPIs
+      rawData: {
+        currentAssets: bs.assets.current.total,
+        currentLiabilities: bs.liabilities.current.total,
+        cash: bs.assets.current.cash,
+        inventory: bs.assets.current.inventory,
+        totalAssets: bs.assets.totalAssets,
+        totalEquity: bs.equity.total,
+        totalRevenue: pl.revenue.total,
+        grossProfit: pl.grossProfit,
+        operatingIncome: pl.operatingIncome,
+        netIncome: pl.netIncome,
+        operatingCashFlow: cf.operatingActivities.netCash,
+        totalLiabilities: bs.liabilities.totalLiabilities
       }
+      // NO CALCULATIONS - Only normalized raw data
+      // All KPI calculations must be done by LLM using prompt.txt
     };
   }
   
   /**
-   * Calculate trends from historical data
+   * REMOVED: calculateTrends - NO CALCULATIONS
+   * Only data normalization allowed - LLM handles all calculations
    */
-  private static calculateTrends(qboData: any) {
-    // Simplified - would need historical data
-    return {
-      monthlyRevenue: [],
-      monthlyExpenses: [],
-      monthlyProfit: [],
-      monthlyCashFlow: []
-    };
-  }
   
   /**
-   * Calculate variance between periods
+   * REMOVED: calculateVariance - NO CALCULATIONS
+   * Only data normalization allowed - LLM handles all calculations
    */
-  private static calculateVariance(current: number, previous: number) {
-    const amount = current - previous;
-    const percentage = previous !== 0 ? (amount / previous) * 100 : 0;
-    
-    return {
-      amount,
-      percentage,
-      trend: amount > 0 ? 'increase' as const : amount < 0 ? 'decrease' as const : 'stable' as const,
-      significance: Math.abs(percentage) > 20 ? 'high' as const : 
-                   Math.abs(percentage) > 10 ? 'medium' as const : 'low' as const
-    };
-  }
   
   /**
-   * Get industry benchmarks
+   * REMOVED: getIndustryBenchmarks - NO BENCHMARKING
+   * Only data normalization allowed - LLM handles all analysis
    */
-  private static getIndustryBenchmarks(industry: string): Record<string, number> {
-    // Industry-specific benchmarks - would come from database
-    const benchmarks: Record<string, Record<string, number>> = {
-      'technology': {
-        grossMargin: 70,
-        operatingMargin: 25,
-        currentRatio: 2.0,
-        debtToEquity: 0.5
-      },
-      'retail': {
-        grossMargin: 35,
-        operatingMargin: 10,
-        currentRatio: 1.5,
-        debtToEquity: 1.0
-      },
-      'manufacturing': {
-        grossMargin: 30,
-        operatingMargin: 15,
-        currentRatio: 1.8,
-        debtToEquity: 0.8
-      }
-    };
-    
-    return benchmarks[industry.toLowerCase()] || benchmarks['technology'];
-  }
   
   /**
    * Find actual amount for budget comparison

@@ -23,16 +23,15 @@ export function useQuickBooks() {
   // Initialize QBO API client
   const qboClient = useQBOApiClient()
 
-  // Check for existing token on mount
+  // Check for existing token on mount with debounce
   useEffect(() => {
-    const checkConnection = async () => {
-      if (!isLoaded || !isSignedIn) return
-      
+    if (!isLoaded || !isSignedIn) return
+    
+    // Add small delay to batch multiple rapid mounts
+    const timeoutId = setTimeout(async () => {
       try {
-        // Sync user first
-        await syncUser()
-        
-        // Get tokens
+        // NOTE: syncUser is handled by AuthenticatedApp component
+        // Get tokens directly without syncing to avoid redundant calls
         const tokens = await getToken()
         if (tokens) {
           const tokenArray = Array.isArray(tokens) ? tokens : [tokens]
@@ -48,10 +47,10 @@ export function useQuickBooks() {
       } catch (error) {
         console.error('Failed to check QuickBooks connection:', error)
       }
-    }
+    }, 100) // 100ms debounce
     
-    checkConnection()
-  }, [isLoaded, isSignedIn, syncUser, getToken])
+    return () => clearTimeout(timeoutId)
+  }, [isLoaded, isSignedIn, getToken])
 
   const connectQuickBooks = useCallback(async () => {
     try {

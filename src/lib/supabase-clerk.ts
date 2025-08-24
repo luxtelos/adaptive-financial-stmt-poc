@@ -78,8 +78,9 @@ export function createSupabaseClient(
 // REACT HOOK FOR SUPABASE WITH CLERK
 // =====================================================
 
-// Singleton instance to avoid multiple client warnings
+// Singleton instances to avoid multiple client warnings and share caches
 let supabaseClientInstance: SupabaseClient | null = null;
+let qboServicesInstance: SupabaseQBOServices | null = null;
 
 export function useSupabaseWithClerk() {
   const { getToken, isLoaded, isSignedIn, userId } = useAuth();
@@ -110,6 +111,15 @@ export function useSupabaseWithClerk() {
 // =====================================================
 
 export class QBOTokenService {
+  private syncCache = new Map<string, { timestamp: number; promise: Promise<boolean> }>();
+  private tokenCache = new Map<string, { timestamp: number; promise: Promise<any> }>();
+  
+  // Use environment variables for configuration
+  private readonly CACHE_TTL = 60000; // 1 minute cache for tokens
+  private readonly TOKEN_REFRESH_THRESHOLD_MS = (parseInt(import.meta.env.VITE_QBO_TOKEN_REFRESH_THRESHOLD_HOURS || '12') * 60 * 60 * 1000);
+  private readonly MAX_RETRIES = parseInt(import.meta.env.VITE_QBO_TOKEN_REFRESH_RETRY_MAX || '3');
+  private readonly RETRY_BACKOFF_MS = parseInt(import.meta.env.VITE_QBO_TOKEN_REFRESH_BACKOFF_MS || '2000');
+  
   constructor(private client: SupabaseClient) {}
   
   /**
@@ -125,6 +135,9 @@ export class QBOTokenService {
       company_name?: string;
     }
   ): Promise<StoreTokenResult> {
+    // Clear cache when storing new token
+    this.tokenCache.clear();
+    
     const { data, error } = await this.client.rpc('store_qbo_tokens', {
       p_clerk_id: clerkUserId,
       p_access_token: params.access_token,
@@ -145,6 +158,29 @@ export class QBOTokenService {
    * Get QBO token for a realm
    */
   async getToken(clerkUserId: string, realmId?: string): Promise<QBOToken | QBOToken[] | null> {
+    // Check cache first to prevent redundant calls
+    const cacheKey = `token_${clerkUserId}_${realmId || 'all'}`;
+    const cached = this.tokenCache.get(cacheKey);
+    
+    if (cached && Date.now() - cached.timestamp < this.CACHE_TTL) {
+      console.log('Using cached token promise for user:', clerkUserId);
+      return cached.promise;
+    }
+    
+    // Create the promise for fetching token
+    const tokenPromise = this.fetchToken(clerkUserId, realmId);
+    
+    // Cache the PROMISE immediately to prevent concurrent calls
+    this.tokenCache.set(cacheKey, {
+      timestamp: Date.now(),
+      promise: tokenPromise
+    });
+    
+    return tokenPromise;
+  }
+  
+  private async fetchToken(clerkUserId: string, realmId?: string): Promise<QBOToken | QBOToken[] | null> {
+    console.log('Fetching fresh token for user:', clerkUserId);
     const { data, error } = await this.client.rpc('get_qbo_token', {
       p_clerk_id: clerkUserId,
       p_realm_id: realmId || null,
@@ -155,13 +191,49 @@ export class QBOTokenService {
     }
     
     const response = data as SupabaseResponse<QBOToken | QBOToken[]>;
-    return response.success ? response.data || null : null;
+    const result = response.success ? response.data || null : null;
+    
+    // Check if token needs refresh based on threshold
+    if (result) {
+      const tokens = Array.isArray(result) ? result : [result];
+      for (const token of tokens) {
+        if (this.needsRefresh(token)) {
+          console.log(`Token for realm ${token.realm_id} needs refresh (expires in ${this.getTokenExpirationTime(token) / 1000 / 60} minutes)`);
+          // Note: Actual refresh would be handled by the QBO service that uses this token
+        }
+      }
+    }
+    
+    return result;
   }
   
   /**
    * Sync Clerk user with Supabase
    */
   async syncUser(clerkUserId: string, email: string): Promise<boolean> {
+    // Check cache first to prevent redundant calls
+    const cacheKey = `${clerkUserId}_${email}`;
+    const cached = this.syncCache.get(cacheKey);
+    
+    if (cached && Date.now() - cached.timestamp < this.CACHE_TTL) {
+      console.log('Using cached sync result for user:', clerkUserId);
+      return cached.promise;
+    }
+    
+    // Create new sync promise
+    const syncPromise = this.performSync(clerkUserId, email);
+    
+    // Cache the promise to prevent concurrent calls
+    this.syncCache.set(cacheKey, {
+      timestamp: Date.now(),
+      promise: syncPromise
+    });
+    
+    return syncPromise;
+  }
+  
+  private async performSync(clerkUserId: string, email: string): Promise<boolean> {
+    console.log('Performing actual sync for user:', clerkUserId);
     const { data, error } = await this.client.rpc('sync_clerk_user', {
       p_clerk_id: clerkUserId,
       p_email: email,
@@ -175,7 +247,7 @@ export class QBOTokenService {
   }
   
   /**
-   * Refresh OAuth tokens
+   * Refresh OAuth tokens with retry logic
    */
   async refreshToken(
     clerkUserId: string,
@@ -184,25 +256,52 @@ export class QBOTokenService {
     newRefreshToken: string,
     expiresIn?: number
   ): Promise<boolean> {
-    const { data, error } = await this.client.rpc('refresh_qbo_token', {
-      p_clerk_id: clerkUserId,
-      p_realm_id: realmId,
-      p_access_token: newAccessToken,
-      p_refresh_token: newRefreshToken,
-      p_expires_in: expiresIn || 3600,
-    });
+    let lastError: Error | null = null;
     
-    if (error) {
-      throw new Error(`Failed to refresh token: ${error.message}`);
+    // Retry with exponential backoff
+    for (let attempt = 0; attempt < this.MAX_RETRIES; attempt++) {
+      try {
+        // Clear token cache on refresh
+        this.tokenCache.clear();
+        
+        const { data, error } = await this.client.rpc('refresh_qbo_token', {
+          p_clerk_id: clerkUserId,
+          p_realm_id: realmId,
+          p_access_token: newAccessToken,
+          p_refresh_token: newRefreshToken,
+          p_expires_in: expiresIn || 3600,
+        });
+        
+        if (error) {
+          throw new Error(`Failed to refresh token: ${error.message}`);
+        }
+        
+        console.log(`Token refreshed successfully for realm ${realmId}`);
+        return (data as SupabaseResponse).success;
+        
+      } catch (error) {
+        lastError = error as Error;
+        console.error(`Token refresh attempt ${attempt + 1} failed:`, error);
+        
+        if (attempt < this.MAX_RETRIES - 1) {
+          // Wait with exponential backoff
+          const delay = this.RETRY_BACKOFF_MS * Math.pow(2, attempt);
+          console.log(`Retrying in ${delay}ms...`);
+          await new Promise(resolve => setTimeout(resolve, delay));
+        }
+      }
     }
     
-    return (data as SupabaseResponse).success;
+    throw lastError || new Error('Failed to refresh token after max retries');
   }
   
   /**
    * Revoke QBO token
    */
   async revokeToken(clerkUserId: string, realmId?: string): Promise<number> {
+    // Clear cache when revoking token
+    this.tokenCache.clear();
+    
     const { data, error } = await this.client.rpc('revoke_qbo_tokens', {
       p_clerk_id: clerkUserId,
       p_realm_id: realmId || null,
@@ -221,6 +320,14 @@ export class QBOTokenService {
    */
   isTokenExpired(token: QBOToken): boolean {
     return new Date(token.expires_at) <= new Date();
+  }
+  
+  /**
+   * Check if token needs refresh based on threshold
+   */
+  needsRefresh(token: QBOToken): boolean {
+    const timeUntilExpiry = this.getTokenExpirationTime(token);
+    return timeUntilExpiry <= this.TOKEN_REFRESH_THRESHOLD_MS;
   }
   
   /**
@@ -310,7 +417,11 @@ export function useQBOServices() {
     };
   }
   
-  const services = new SupabaseQBOServices(client);
+  // Use singleton instance to share cache across all components
+  if (!qboServicesInstance) {
+    qboServicesInstance = new SupabaseQBOServices(client);
+  }
+  const services = qboServicesInstance;
   
   // Helper functions that automatically include clerk user ID
   const syncUser = async () => {
