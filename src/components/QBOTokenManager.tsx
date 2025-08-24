@@ -40,12 +40,8 @@ export const QBOTokenManager: React.FC<TokenManagerProps> = ({
   const [loading, setLoading] = useState(false);
   const [showAdminHistory, setShowAdminHistory] = useState(false);
 
-  // Sync user on mount
-  useEffect(() => {
-    if (isSignedIn && userId) {
-      syncUser().catch(console.error);
-    }
-  }, [isSignedIn, userId, syncUser]);
+  // REMOVED: Sync user on mount - handled by parent component
+  // This was causing redundant sync calls
 
   const loadAdminHistory = async () => {
     if (!realmId) return;

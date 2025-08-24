@@ -3,7 +3,7 @@ import { Routes, Route, Navigate, useSearchParams } from 'react-router-dom'
 import { useUser, SignedIn, SignedOut, RedirectToSignIn } from '@clerk/clerk-react'
 import { Header } from './layout/Header'
 import { QuickBooksConnection } from './quickbooks/QuickBooksConnection'
-import { ReportGeneration } from './reports/ReportGeneration'
+import { ReportGenerationV2 } from './reports/ReportGenerationV2'
 import { useQBOServices } from '../lib/supabase-clerk'
 import { useQuickBooks } from '../hooks/useQuickBooks'
 import { useToast } from '../hooks/use-toast'
@@ -21,11 +21,16 @@ function Dashboard() {
   // Get QuickBooks connection status
   const { isConnected: isQBConnected } = useQuickBooks()
 
+  // Single user sync on mount - prevents redundant calls
   useEffect(() => {
     if (user) {
+      // Only sync once on initial mount
       syncUserData()
     }
-    
+  }, [user?.id]) // Only re-run if user ID changes (sign in/out)
+  
+  // Handle QBO connection status separately  
+  useEffect(() => {
     // Check for connection status in URL params
     const connectionStatus = searchParams.get('qbo_connection')
     if (connectionStatus) {
@@ -35,6 +40,8 @@ function Dashboard() {
           description: 'Your QuickBooks account has been successfully connected.',
           variant: 'success',
         })
+        // Sync user after successful QBO connection
+        syncUserData()
       } else if (connectionStatus === 'failed') {
         toast({
           title: 'Connection Failed',
@@ -46,7 +53,7 @@ function Dashboard() {
       searchParams.delete('qbo_connection')
       setSearchParams(searchParams)
     }
-  }, [user, searchParams, setSearchParams, toast])
+  }, [searchParams, setSearchParams, toast])
 
   const syncUserData = async () => {
     if (!user) return
@@ -84,7 +91,7 @@ function Dashboard() {
           
           {/* Import Data & Generate Report - Only visible after QBO connection */}
           {isQBConnected && (
-            <ReportGeneration 
+            <ReportGenerationV2 
               companyId={user?.id}
               onReportGenerated={handleReportGenerated}
             />

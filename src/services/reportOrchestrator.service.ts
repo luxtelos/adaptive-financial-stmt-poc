@@ -27,7 +27,7 @@ export class ReportOrchestratorService {
       includePreviousPeriod?: boolean;
       includeBudget?: boolean;
       generatePDF?: boolean;
-      generateExcel?: boolean;
+      // REMOVED: generateExcel - only PDF export is in scope
       industryBenchmarks?: boolean;
       scenarioAnalysis?: boolean;
     } = {}
@@ -88,17 +88,8 @@ export class ReportOrchestratorService {
         llmInputData
       );
       
-      // Step 8: Store report in database
-      console.log('Step 8: Storing report in database...');
-      const savedReport = await this.saveReport({
-        connectionId,
-        reportPeriod,
-        llmInputData,
-        llmAnalysis,
-        reportSections,
-        dashboardData,
-        additionalAnalyses
-      });
+      // Step 8: REMOVED - Database storage to maintain stateless architecture
+      // Financial data is NOT stored - exists only during active session
       
       // Step 9: Generate PDF if requested
       let pdfUrl: string | undefined;
@@ -112,16 +103,7 @@ export class ReportOrchestratorService {
         );
       }
       
-      // Step 10: Generate Excel if requested
-      let excelUrl: string | undefined;
-      if (options.generateExcel) {
-        console.log('Step 10: Generating Excel report...');
-        excelUrl = await this.generateExcelReport(
-          llmInputData,
-          llmAnalysis,
-          savedReport.id
-        );
-      }
+      // Step 10: REMOVED - Excel generation not in scope (PDF only)
       
       console.log('Report generation completed successfully!');
       
@@ -133,7 +115,7 @@ export class ReportOrchestratorService {
         llmAnalysis,
         additionalAnalyses,
         pdfUrl,
-        excelUrl,
+        // REMOVED: excelUrl - only PDF export is in scope
         metadata: {
           generatedAt: new Date().toISOString(),
           period: reportPeriod,
@@ -278,7 +260,9 @@ export class ReportOrchestratorService {
   /**
    * Save report to database
    */
-  private static async saveReport(reportData: any) {
+  // REMOVED: saveReport method to maintain stateless architecture
+  // Financial data from QuickBooks is NOT stored in the database
+  private static async saveReportRemoved(reportData: any) {
     const { data, error } = await supabase
       .from('financial_reports')
       .insert({
@@ -349,80 +333,20 @@ export class ReportOrchestratorService {
   }
   
   /**
-   * Generate Excel report
+   * REMOVED: Excel export not in scope - only PDF export is required
    */
-  private static async generateExcelReport(
-    financialData: FinancialDataForLLM,
-    llmAnalysis: LLMAnalysisResponse,
-    reportId: string
-  ) {
-    // Generate Excel
-    const excelBlob = await PDFEnhancedService.generateExcel(
-      financialData,
-      llmAnalysis
-    );
-    
-    // Upload to storage
-    const fileName = `reports/${reportId}/financial-report-${new Date().toISOString()}.xlsx`;
-    const { data, error } = await supabase.storage
-      .from('reports')
-      .upload(fileName, excelBlob, {
-        contentType: 'application/vnd.openxmlformats-officedocument.spreadsheetml.sheet',
-        cacheControl: '3600'
-      });
-    
-    if (error) throw error;
-    
-    // Get public URL
-    const { data: { publicUrl } } = supabase.storage
-      .from('reports')
-      .getPublicUrl(fileName);
-    
-    // Update report record with Excel URL
-    await supabase
-      .from('financial_reports')
-      .update({ excel_url: publicUrl })
-      .eq('id', reportId);
-    
-    return publicUrl;
-  }
   
   /**
-   * Get executive briefing
+   * REMOVED: getExecutiveBriefing - stateless architecture
+   * Reports are not stored in database
    */
-  static async getExecutiveBriefing(reportId: string): Promise<string> {
-    // Fetch report from database
-    const { data: report, error } = await supabase
-      .from('financial_reports')
-      .select('llm_analysis')
-      .eq('id', reportId)
-      .single();
-    
-    if (error || !report) {
-      throw new Error('Report not found');
-    }
-    
-    // Generate executive briefing
-    return await PerplexityEnhancedService.getExecutiveBriefing(
-      report.llm_analysis
-    );
-  }
   
   /**
-   * Refresh report with latest data
+   * REMOVED: refreshReport - stateless architecture
+   * Reports are not stored in database, generated fresh each time
    */
-  static async refreshReport(reportId: string) {
-    // Fetch existing report
-    const { data: existingReport, error } = await supabase
-      .from('financial_reports')
-      .select('*')
-      .eq('id', reportId)
-      .single();
-    
-    if (error || !existingReport) {
-      throw new Error('Report not found');
-    }
-    
+  static async refreshReportRemoved(reportId: string) {
+    // This method is removed - stateless architecture
     // Generate new report with same parameters
     return await this.generateComprehensiveReport(
       existingReport.connection_id,
@@ -432,8 +356,8 @@ export class ReportOrchestratorService {
       },
       {
         includePreviousPeriod: true,
-        generatePDF: true,
-        generateExcel: true
+        generatePDF: true
+        // REMOVED: generateExcel - only PDF export is in scope
       }
     );
   }

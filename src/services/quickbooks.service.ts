@@ -132,13 +132,15 @@ export class QBOTokenManager {
   }
 
   /**
-   * Check if token is expiring soon (within 5 minutes)
+   * Check if token is expiring soon based on configured threshold
    */
   private isExpiringSoon(token: QBOToken): boolean {
     const expiresAt = new Date(token.expires_at).getTime()
     const now = Date.now()
-    const fiveMinutes = 5 * 60 * 1000
-    return expiresAt - now <= fiveMinutes
+    // Use environment variable or default to 12 hours
+    const refreshThresholdHours = parseInt(import.meta.env.VITE_QBO_TOKEN_REFRESH_THRESHOLD_HOURS || '12')
+    const thresholdMs = refreshThresholdHours * 60 * 60 * 1000
+    return expiresAt - now <= thresholdMs
   }
 
   /**
