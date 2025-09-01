@@ -4,6 +4,7 @@ import { useSearchParams, useNavigate } from 'react-router-dom'
 import { Card, CardContent, CardDescription, CardHeader, CardTitle } from '../components/ui/card'
 import { supabase } from '../lib/supabase'
 import { Loader2 } from 'lucide-react'
+import { useEulaAgreement } from '../hooks/useEulaAgreement'
 
 interface QBTokens {
   access_token: string
@@ -16,6 +17,7 @@ export function SignInPage() {
   const [searchParams] = useSearchParams()
   const navigate = useNavigate()
   const { isSignedIn, user, isLoaded } = useUser()
+  const { hasAgreed, isLoading: eulaLoading } = useEulaAgreement()
   const [isProcessingTokens, setIsProcessingTokens] = useState(false)
   const redirectUrl = searchParams.get('redirect_url')
   
@@ -32,7 +34,6 @@ export function SignInPage() {
         return JSON.parse(decodeURIComponent(qbTokensParam))
       }
     } catch (e) {
-      console.error('Failed to extract tokens:', e)
     }
     return null
   }
@@ -40,7 +41,13 @@ export function SignInPage() {
   // Process QBO tokens after successful sign-in
   useEffect(() => {
     const processTokens = async () => {
-      if (!isLoaded || !isSignedIn || !user || isProcessingTokens) return
+      if (!isLoaded || !isSignedIn || !user || isProcessingTokens || eulaLoading) return
+      
+      // Check EULA agreement first
+      if (!hasAgreed) {
+        navigate('/eula-agreement', { state: { redirectTo: '/dashboard' } })
+        return
+      }
       
       const tokens = extractTokensFromRedirectUrl(redirectUrl)
       if (!tokens) {
@@ -54,7 +61,6 @@ export function SignInPage() {
       setIsProcessingTokens(true)
       
       try {
-        console.log('Processing QBO tokens after sign-in for user:', user.id)
         
         // Store tokens in Supabase
         const { data, error } = await supabase.rpc('store_qbo_tokens', {
@@ -67,16 +73,11 @@ export function SignInPage() {
         })
         
         if (error) {
-          console.error('Failed to store tokens:', error)
-          // Still navigate to dashboard but with error state
           navigate('/dashboard?qbo_connection=failed')
         } else {
-          console.log('Successfully stored QBO tokens')
-          // Navigate to dashboard with success state
           navigate('/dashboard?qbo_connection=success')
         }
       } catch (error) {
-        console.error('Error processing tokens:', error)
         navigate('/dashboard?qbo_connection=failed')
       } finally {
         setIsProcessingTokens(false)
@@ -84,7 +85,7 @@ export function SignInPage() {
     }
     
     processTokens()
-  }, [isLoaded, isSignedIn, user, redirectUrl, navigate, isProcessingTokens])
+  }, [isLoaded, isSignedIn, user, redirectUrl, navigate, isProcessingTokens, hasAgreed, eulaLoading])
   
   // Determine the afterSignIn URL - if we have tokens, we'll handle them in useEffect
   const afterSignInUrl = '/dashboard'

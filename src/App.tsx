@@ -1,4 +1,4 @@
-import React, { lazy, Suspense } from 'react'
+import { lazy, Suspense } from 'react'
 import { BrowserRouter as Router, Routes, Route, Navigate, useNavigate } from 'react-router-dom'
 import { Card, CardContent, CardDescription, CardHeader, CardTitle } from './components/ui/card'
 import { Button } from './components/ui/button'
@@ -11,6 +11,11 @@ import { clerkConfig } from './config/clerk'
 import { SignInPage } from './pages/SignInPage'
 import { SignUpPage } from './pages/SignUpPage'
 import { OAuthCallbackPage } from './pages/OAuthCallbackPage'
+import EulaPage from './pages/EulaPage'
+import PrivacyPage from './pages/PrivacyPage'
+import EulaAgreementPage from './pages/EulaAgreementPage'
+import { useEulaAwareAuth } from './hooks/useEulaAwareAuth'
+import EulaModal from './components/legal/EulaModal'
 
 // Lazy load components that require authentication or external services
 const AuthenticatedApp = lazy(() => import('./components/AuthenticatedApp'))
@@ -18,6 +23,15 @@ const AuthenticatedApp = lazy(() => import('./components/AuthenticatedApp'))
 // Landing Page Component (No external dependencies)
 function LandingPage() {
   const navigate = useNavigate()
+  const {
+    showEulaModal,
+    isProcessing,
+    eulaChecked,
+    handleGetStarted,
+    handleEulaAgree,
+    handleEulaDisagree,
+    handleEulaClose,
+  } = useEulaAwareAuth()
 
   // Check if app is configured (but don't initialize services)
   const checkConfiguration = () => {
@@ -33,12 +47,14 @@ function LandingPage() {
     return isConfigured
   }
 
-  const handleGetStarted = () => {
-    if (checkConfiguration()) {
-      navigate('/sign-in')
-    } else {
+  const handleGetStartedClick = () => {
+    if (!checkConfiguration()) {
       navigate('/setup')
+      return
     }
+    
+    // Use the EULA-aware get started handler
+    handleGetStarted()
   }
 
   // Default Landing Page
@@ -66,16 +82,18 @@ function LandingPage() {
             <div className="flex flex-col sm:flex-row gap-4 justify-center">
               <Button 
                 size="lg"
-                onClick={handleGetStarted}
+                onClick={handleGetStartedClick}
                 className="px-8"
+                disabled={isProcessing || !eulaChecked}
               >
-                Get Started
+                {isProcessing ? 'Processing...' : !eulaChecked ? 'Loading...' : 'Get Started'}
               </Button>
               <Button 
                 size="lg"
                 variant="outline"
                 onClick={() => navigate('/demo')}
                 className="px-8"
+                disabled={isProcessing}
               >
                 Try Demo
               </Button>
@@ -127,6 +145,14 @@ function LandingPage() {
           </Card>
         </div>
       </div>
+      
+      {/* EULA Modal */}
+      <EulaModal
+        isOpen={showEulaModal}
+        onAgree={handleEulaAgree}
+        onDisagree={handleEulaDisagree}
+        onClose={handleEulaClose}
+      />
     </div>
   )
 }
@@ -291,6 +317,9 @@ function App() {
           <Route path="/" element={<LandingPage />} />
           <Route path="/setup" element={<SetupGuide />} />
           <Route path="/demo" element={<DemoMode />} />
+          <Route path="/eula" element={<EulaPage />} />
+          <Route path="/privacy" element={<PrivacyPage />} />
+          <Route path="/eula-agreement" element={<EulaAgreementPage />} />
           <Route path="*" element={<Navigate to="/" replace />} />
         </Routes>
         <Toaster />
@@ -313,6 +342,9 @@ function App() {
           <Route path="/" element={<LandingPage />} />
           <Route path="/setup" element={<SetupGuide />} />
           <Route path="/demo" element={<DemoMode />} />
+          <Route path="/eula" element={<EulaPage />} />
+          <Route path="/privacy" element={<PrivacyPage />} />
+          <Route path="/eula-agreement" element={<EulaAgreementPage />} />
           <Route path="/sign-in" element={<SignInPage />} />
           <Route path="/sign-up" element={<SignUpPage />} />
           <Route path="/dashboard/*" element={
