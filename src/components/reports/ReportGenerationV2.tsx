@@ -167,9 +167,6 @@ export function ReportGenerationV2({ companyId, onReportGenerated }: ReportGener
         setGeneratedReport(result)
         setPdfBlob(result.data.pdfBlob || null)
         
-        // REMOVED: Database storage to maintain stateless architecture
-        // Financial data is NOT stored - exists only during active session
-        
         componentLogger.info('Report generated successfully')
         toast({
           title: 'Report Generated',
@@ -212,7 +209,6 @@ export function ReportGenerationV2({ companyId, onReportGenerated }: ReportGener
     if (openInNewTab) {
       const url = URL.createObjectURL(pdfBlob)
       window.open(url, '_blank')
-      // Clean up the URL after a delay to ensure it opens
       setTimeout(() => URL.revokeObjectURL(url), 1000)
     } else {
       setShowPdfViewer(true)
@@ -247,82 +243,425 @@ export function ReportGenerationV2({ companyId, onReportGenerated }: ReportGener
     })
   }
 
+  // Helper function to normalize column titles
+  const normalizeColumnTitle = (title: string) => {
+    return title.toLowerCase().replace(/\s+/g, '_').replace(/[^a-z0-9_]/g, '')
+  }
+
+  // Function to extract table data from financial reports with dynamic column support
+  const extractTableData = (reportData: any) => {
+    if (!reportData) return []
+    
+    const tableRows: any[] = []
+    
+    // Check if this is a "No Report Data" case
+    const hasNoData = reportData.headers?.Option?.some((opt: any) => 
+      opt.Name === 'NoReportData' && opt.Value === 'true'
+    )
+    
+    if (hasNoData) {
+      tableRows.push({
+        type: 'message',
+        account: 'No data available for the selected period',
+        amount: '',
+        group: 'NoData',
+        level: 0
+      })
+      return tableRows
+    }
+    
+    // Get columns to determine structure
+    const columns = reportData.columns?.Column || []
+    
+    // Helper function to extract row data based on column structure
+    const extractRowData = (colData: any[], level: number = 0, type: string = 'data') => {
+      const rowData: any = { type: type.toLowerCase(), level }
+      
+      // Map each column data to the appropriate key
+      colData.forEach((col: any, index: number) => {
+        const column = columns[index]
+        if (column) {
+          const columnKey = column.MetaData?.find((m: any) => m.Name === 'ColKey')?.Value || 
+                           (column.ColTitle ? normalizeColumnTitle(column.ColTitle) : '') || 
+                           `col_${index}`
+          rowData[columnKey] = col.value || ''
+        }
+      })
+      
+      // For backward compatibility with simple 2-column reports
+      if (columns.length <= 2) {
+        rowData.account = colData[0]?.value || ''
+        rowData.amount = colData[1]?.value || ''
+      }
+      
+      return rowData
+    }
+    
+    // Helper function to recursively process rows
+    const processRows = (rows: any[], level: number = 0) => {
+      rows.forEach((row: any) => {
+        // Handle Header rows
+        if (row.Header?.ColData) {
+          tableRows.push(extractRowData(row.Header.ColData, level, 'header'))
+        }
+        
+        // Handle direct ColData
+        if (row.ColData) {
+          const rowType = row.type || 'data'
+          tableRows.push(extractRowData(row.ColData, level, rowType))
+        }
+        
+        // Handle Summary rows
+        if (row.Summary?.ColData) {
+          tableRows.push(extractRowData(row.Summary.ColData, level, 'summary'))
+        }
+        
+        // Handle nested rows
+        if (row.Rows?.Row) {
+          processRows(row.Rows.Row, level + 1)
+        }
+      })
+    }
+    
+    // Extract rows from the report
+    if (reportData.rows?.Row) {
+      processRows(reportData.rows.Row)
+    }
+    
+    return tableRows
+  }
+
+  // Function to extract multi-column table data (for AR/AP reports)
+  const extractMultiColumnData = (reportData: any) => {
+    if (!reportData) return []
+    
+    const tableRows: any[] = []
+    const columns = reportData.columns?.Column || []
+    
+    if (reportData.rows?.Row) {
+      reportData.rows.Row.forEach((row: any) => {
+        const rowData: any = { type: row.type?.toLowerCase() || 'data' }
+        
+        // Extract data from ColData or Summary
+        const colData = row.ColData || row.Summary?.ColData || []
+        
+        colData.forEach((col: any, index: number) => {
+          const columnKey = columns[index]?.MetaData?.find((m: any) => m.Name === 'ColKey')?.Value || `col_${index}`
+          rowData[columnKey] = col.value || ''
+        })
+        
+        tableRows.push(rowData)
+      })
+    }
+    
+    return tableRows
+  }
+
+  const formatMoney = (value: string) => {
+    if (!value || value === '' || value === '0.00') return '-'
+    const num = parseFloat(value)
+    if (isNaN(num)) return value
+    
+    const formatted = new Intl.NumberFormat('en-US', {
+      style: 'currency',
+      currency: 'USD',
+      minimumFractionDigits: 2,
+    }).format(Math.abs(num))
+
+    return num < 0 ? `(${formatted})` : formatted
+  }
+
+  const getIndentation = (level: number) => {
+    return 'pl-' + (level * 4)
+  }
+
   const renderDataPreview = () => {
     if (!previewData) return null
 
     return (
-      <div className="mt-4 p-4 bg-gray-50 rounded-lg">
-        <div className="flex items-center justify-between mb-3">
-          <h4 className="text-sm font-semibold text-gray-700">
-            Data Preview - {months.find(m => m.value === selectedMonth)?.label} {selectedYear}
-          </h4>
-          <div className="flex gap-2">
-            <Button
-              size="sm"
-              variant="ghost"
-              onClick={() => setShowRawData(!showRawData)}
-            >
-              <CodeIcon className="h-4 w-4 mr-1" />
-              {showRawData ? 'Hide' : 'Show'} Raw
-            </Button>
+      <div className="mt-4 space-y-6">
+        {/* Header */}
+        <div className="flex items-center justify-between pb-4 border-b border-gray-200">
+          <div>
+            <h3 className="text-lg font-semibold text-gray-900">Financial Data Preview</h3>
+            <p className="text-sm text-gray-600">
+              {months.find(m => m.value === selectedMonth)?.label} {selectedYear}
+            </p>
           </div>
+          <Button
+            size="sm"
+            variant="outline"
+            onClick={() => setShowRawData(!showRawData)}
+            className="border-gray-300"
+          >
+            <CodeIcon className="h-4 w-4 mr-2" />
+            {showRawData ? 'Tables' : 'JSON'}
+          </Button>
         </div>
-        
-        {!showRawData ? (
-          <div className="space-y-2 text-xs">
-            <div className="grid grid-cols-2 gap-2">
-              <div className="flex justify-between">
-                <span className="text-gray-600">P&L MTD:</span>
-                <Badge variant={previewData.plMTD ? "default" : "secondary"}>
-                  {previewData.plMTD ? 'Available' : 'Missing'}
-                </Badge>
-              </div>
-              <div className="flex justify-between">
-                <span className="text-gray-600">P&L QTD:</span>
-                <Badge variant={previewData.plQTD ? "default" : "secondary"}>
-                  {previewData.plQTD ? 'Available' : 'Missing'}
-                </Badge>
-              </div>
-              <div className="flex justify-between">
-                <span className="text-gray-600">Balance Sheet:</span>
-                <Badge variant={previewData.balanceSheet ? "default" : "secondary"}>
-                  {previewData.balanceSheet ? 'Available' : 'Missing'}
-                </Badge>
-              </div>
-              <div className="flex justify-between">
-                <span className="text-gray-600">Cash Flow:</span>
-                <Badge variant={previewData.cashFlow ? "default" : "secondary"}>
-                  {previewData.cashFlow ? 'Available' : 'Missing'}
-                </Badge>
-              </div>
-              <div className="flex justify-between">
-                <span className="text-gray-600">AR Aging:</span>
-                <Badge variant={previewData.ar ? "default" : "secondary"}>
-                  {previewData.ar ? 'Available' : 'Missing'}
-                </Badge>
-              </div>
-              <div className="flex justify-between">
-                <span className="text-gray-600">AP Aging:</span>
-                <Badge variant={previewData.ap ? "default" : "secondary"}>
-                  {previewData.ap ? 'Available' : 'Missing'}
-                </Badge>
-              </div>
-            </div>
-            {previewData.metadata && (
-              <div className="mt-3 pt-3 border-t border-gray-200">
-                <p className="text-xs text-gray-500">
-                  Period: {previewData.metadata.month}/{previewData.metadata.year} | 
-                  Quarter: Q{previewData.metadata.quarter} |
-                  Retrieved: {new Date(previewData.metadata.generatedAt).toLocaleTimeString()}
-                </p>
-              </div>
-            )}
-          </div>
-        ) : (
-          <div className="max-h-60 overflow-auto">
-            <pre className="text-xs text-gray-600">
+
+        {showRawData ? (
+          <div className="bg-gray-900 rounded-md p-4 max-h-96 overflow-auto">
+            <pre className="text-green-400 text-xs font-mono">
               {JSON.stringify(previewData, null, 2)}
             </pre>
+          </div>
+        ) : (
+          <div className="space-y-8">
+            {/* Profit & Loss MTD */}
+            {previewData.plMTD && (
+              <div className="bg-white border border-gray-200 rounded-md overflow-hidden">
+                <div className="bg-gray-50 px-6 py-4 border-b border-gray-200">
+                  <h4 className="text-base font-semibold text-gray-900">Profit & Loss Statement (MTD)</h4>
+                  <p className="text-sm text-gray-600 mt-1">
+                    {previewData.plMTD.headers.StartPeriod} to {previewData.plMTD.headers.EndPeriod}
+                  </p>
+                </div>
+                <div className="overflow-x-auto">
+                  <table className="w-full">
+                    <thead>
+                      <tr className="border-b border-gray-200 bg-white">
+                        <th className="text-left py-4 px-6 text-sm font-semibold text-gray-900">Account</th>
+                        <th className="text-right py-4 px-6 text-sm font-semibold text-gray-900">Amount</th>
+                      </tr>
+                    </thead>
+                    <tbody className="bg-white">
+                      {extractTableData(previewData.plMTD).map((row, index) => (
+                        <tr key={index} className={`
+                          ${index % 2 === 0 ? 'bg-white' : 'bg-gray-50'} 
+                          ${row.type === 'header' ? 'bg-gray-100 font-medium' : ''} 
+                          ${row.type === 'summary' ? 'bg-gray-100 font-semibold border-t-2 border-gray-300' : ''}
+                          hover:bg-gray-50 transition-colors
+                        `}>
+                          <td className={`py-3 px-6 text-sm text-gray-900 ${getIndentation(row.level)}`}>
+                            <div className="flex items-center">
+                              {row.level > 0 && <span className="text-gray-400 mr-2">—</span>}
+                              {row.account}
+                            </div>
+                          </td>
+                          <td className="py-3 px-6 text-right text-sm text-gray-900 font-mono">
+                            {formatMoney(row.amount)}
+                          </td>
+                        </tr>
+                      ))}
+                    </tbody>
+                  </table>
+                </div>
+              </div>
+            )}
+
+            {/* Profit & Loss QTD */}
+            {previewData.plQTD && (
+              <div className="bg-white border border-gray-200 rounded-md overflow-hidden">
+                <div className="bg-gray-50 px-6 py-4 border-b border-gray-200">
+                  <h4 className="text-base font-semibold text-gray-900">Profit & Loss Statement (QTD)</h4>
+                  <p className="text-sm text-gray-600 mt-1">
+                    {previewData.plQTD.headers.StartPeriod} to {previewData.plQTD.headers.EndPeriod}
+                  </p>
+                </div>
+                <div className="overflow-x-auto">
+                  <table className="w-full">
+                    <thead>
+                      <tr className="border-b border-gray-200 bg-white">
+                        <th className="text-left py-4 px-6 text-sm font-semibold text-gray-900">Account</th>
+                        <th className="text-right py-4 px-6 text-sm font-semibold text-gray-900">Amount</th>
+                      </tr>
+                    </thead>
+                    <tbody className="bg-white">
+                      {extractTableData(previewData.plQTD).map((row, index) => (
+                        <tr key={index} className={`
+                          ${index % 2 === 0 ? 'bg-white' : 'bg-gray-50'} 
+                          ${row.type === 'header' ? 'bg-gray-100 font-medium' : ''} 
+                          ${row.type === 'summary' ? 'bg-gray-100 font-semibold border-t-2 border-gray-300' : ''}
+                          hover:bg-gray-50 transition-colors
+                        `}>
+                          <td className={`py-3 px-6 text-sm text-gray-900 ${getIndentation(row.level)}`}>
+                            <div className="flex items-center">
+                              {row.level > 0 && <span className="text-gray-400 mr-2">—</span>}
+                              {row.account}
+                            </div>
+                          </td>
+                          <td className="py-3 px-6 text-right text-sm text-gray-900 font-mono">
+                            {formatMoney(row.amount)}
+                          </td>
+                        </tr>
+                      ))}
+                    </tbody>
+                  </table>
+                </div>
+              </div>
+            )}
+
+            {/* Balance Sheet */}
+            {previewData.balanceSheet && (
+              <div className="bg-white border border-gray-200 rounded-md overflow-hidden">
+                <div className="bg-gray-50 px-6 py-4 border-b border-gray-200">
+                  <h4 className="text-base font-semibold text-gray-900">Balance Sheet</h4>
+                  <p className="text-sm text-gray-600 mt-1">
+                    As of {previewData.balanceSheet.headers.EndPeriod}
+                  </p>
+                </div>
+                <div className="overflow-x-auto">
+                  <table className="w-full">
+                    <thead>
+                      <tr className="border-b border-gray-200 bg-white">
+                        <th className="text-left py-4 px-6 text-sm font-semibold text-gray-900">Account</th>
+                        <th className="text-right py-4 px-6 text-sm font-semibold text-gray-900">Amount</th>
+                      </tr>
+                    </thead>
+                    <tbody className="bg-white">
+                      {extractTableData(previewData.balanceSheet).map((row, index) => (
+                        <tr key={index} className={`
+                          ${index % 2 === 0 ? 'bg-white' : 'bg-gray-50'} 
+                          ${row.type === 'header' ? 'bg-gray-100 font-medium' : ''} 
+                          ${row.type === 'summary' ? 'bg-gray-100 font-semibold border-t-2 border-gray-300' : ''}
+                          hover:bg-gray-50 transition-colors
+                        `}>
+                          <td className={`py-3 px-6 text-sm text-gray-900 ${getIndentation(row.level)}`}>
+                            <div className="flex items-center">
+                              {row.level > 0 && <span className="text-gray-400 mr-2">—</span>}
+                              {row.account}
+                            </div>
+                          </td>
+                          <td className="py-3 px-6 text-right text-sm text-gray-900 font-mono">
+                            {formatMoney(row.amount)}
+                          </td>
+                        </tr>
+                      ))}
+                    </tbody>
+                  </table>
+                </div>
+              </div>
+            )}
+
+            {/* Cash Flow */}
+            {previewData.cashFlow && (
+              <div className="bg-white border border-gray-200 rounded-md overflow-hidden">
+                <div className="bg-gray-50 px-6 py-4 border-b border-gray-200">
+                  <h4 className="text-base font-semibold text-gray-900">Cash Flow Statement</h4>
+                  <p className="text-sm text-gray-600 mt-1">
+                    {previewData.cashFlow.headers.StartPeriod} to {previewData.cashFlow.headers.EndPeriod}
+                  </p>
+                </div>
+                <div className="overflow-x-auto">
+                  <table className="w-full">
+                    <thead>
+                      <tr className="border-b border-gray-200 bg-white">
+                        <th className="text-left py-4 px-6 text-sm font-semibold text-gray-900">Account</th>
+                        <th className="text-right py-4 px-6 text-sm font-semibold text-gray-900">Amount</th>
+                      </tr>
+                    </thead>
+                    <tbody className="bg-white">
+                      {extractTableData(previewData.cashFlow).map((row, index) => (
+                        <tr key={index} className={`
+                          ${index % 2 === 0 ? 'bg-white' : 'bg-gray-50'} 
+                          ${row.type === 'header' ? 'bg-gray-100 font-medium' : ''} 
+                          ${row.type === 'summary' ? 'bg-gray-100 font-semibold border-t-2 border-gray-300' : ''}
+                          hover:bg-gray-50 transition-colors
+                        `}>
+                          <td className={`py-3 px-6 text-sm text-gray-900 ${getIndentation(row.level)}`}>
+                            <div className="flex items-center">
+                              {row.level > 0 && <span className="text-gray-400 mr-2">—</span>}
+                              {row.account}
+                            </div>
+                          </td>
+                          <td className="py-3 px-6 text-right text-sm text-gray-900 font-mono">
+                            {formatMoney(row.amount)}
+                          </td>
+                        </tr>
+                      ))}
+                    </tbody>
+                  </table>
+                </div>
+              </div>
+            )}
+
+            {/* Aged Receivables */}
+            {previewData.ar && (
+              <div className="bg-white border border-gray-200 rounded-md overflow-hidden">
+                <div className="bg-gray-50 px-6 py-4 border-b border-gray-200">
+                  <h4 className="text-base font-semibold text-gray-900">Aged Receivables</h4>
+                  <p className="text-sm text-gray-600 mt-1">
+                    As of {previewData.ar.headers.EndPeriod}
+                  </p>
+                </div>
+                <div className="overflow-x-auto">
+                  <table className="w-full">
+                    <thead>
+                      <tr className="border-b border-gray-200 bg-white">
+                        <th className="text-left py-4 px-6 text-sm font-semibold text-gray-900">Customer</th>
+                        <th className="text-right py-4 px-6 text-sm font-semibold text-gray-900">Current</th>
+                        <th className="text-right py-4 px-6 text-sm font-semibold text-gray-900">1-30</th>
+                        <th className="text-right py-4 px-6 text-sm font-semibold text-gray-900">31-60</th>
+                        <th className="text-right py-4 px-6 text-sm font-semibold text-gray-900">61-90</th>
+                        <th className="text-right py-4 px-6 text-sm font-semibold text-gray-900">91+</th>
+                        <th className="text-right py-4 px-6 text-sm font-semibold text-gray-900">Total</th>
+                      </tr>
+                    </thead>
+                    <tbody className="bg-white">
+                      {extractMultiColumnData(previewData.ar).map((row, index) => (
+                        <tr key={index} className={`
+                          ${index % 2 === 0 ? 'bg-white' : 'bg-gray-50'} 
+                          ${row.type === 'summary' ? 'bg-gray-100 font-semibold border-t-2 border-gray-300' : ''}
+                          hover:bg-gray-50 transition-colors
+                        `}>
+                          <td className="py-3 px-6 text-sm text-gray-900">{row.col_0 || '—'}</td>
+                          <td className="py-3 px-6 text-right text-sm text-gray-900 font-mono">{formatMoney(row.current)}</td>
+                          <td className="py-3 px-6 text-right text-sm text-gray-900 font-mono">{formatMoney(row['0'])}</td>
+                          <td className="py-3 px-6 text-right text-sm text-gray-900 font-mono">{formatMoney(row['1'])}</td>
+                          <td className="py-3 px-6 text-right text-sm text-gray-900 font-mono">{formatMoney(row['2'])}</td>
+                          <td className="py-3 px-6 text-right text-sm text-gray-900 font-mono">{formatMoney(row['3'])}</td>
+                          <td className="py-3 px-6 text-right text-sm text-gray-900 font-mono font-medium">{formatMoney(row.total)}</td>
+                        </tr>
+                      ))}
+                    </tbody>
+                  </table>
+                </div>
+              </div>
+            )}
+
+            {/* Aged Payables */}
+            {previewData.ap && (
+              <div className="bg-white border border-gray-200 rounded-md overflow-hidden">
+                <div className="bg-gray-50 px-6 py-4 border-b border-gray-200">
+                  <h4 className="text-base font-semibold text-gray-900">Aged Payables</h4>
+                  <p className="text-sm text-gray-600 mt-1">
+                    As of {previewData.ap.headers.EndPeriod}
+                  </p>
+                </div>
+                <div className="overflow-x-auto">
+                  <table className="w-full">
+                    <thead>
+                      <tr className="border-b border-gray-200 bg-white">
+                        <th className="text-left py-4 px-6 text-sm font-semibold text-gray-900">Vendor</th>
+                        <th className="text-right py-4 px-6 text-sm font-semibold text-gray-900">Current</th>
+                        <th className="text-right py-4 px-6 text-sm font-semibold text-gray-900">1-30</th>
+                        <th className="text-right py-4 px-6 text-sm font-semibold text-gray-900">31-60</th>
+                        <th className="text-right py-4 px-6 text-sm font-semibold text-gray-900">61-90</th>
+                        <th className="text-right py-4 px-6 text-sm font-semibold text-gray-900">91+</th>
+                        <th className="text-right py-4 px-6 text-sm font-semibold text-gray-900">Total</th>
+                      </tr>
+                    </thead>
+                    <tbody className="bg-white">
+                      {extractMultiColumnData(previewData.ap).map((row, index) => (
+                        <tr key={index} className={`
+                          ${index % 2 === 0 ? 'bg-white' : 'bg-gray-50'} 
+                          ${row.type === 'summary' ? 'bg-gray-100 font-semibold border-t-2 border-gray-300' : ''}
+                          hover:bg-gray-50 transition-colors
+                        `}>
+                          <td className="py-3 px-6 text-sm text-gray-900">{row.col_0 || '—'}</td>
+                          <td className="py-3 px-6 text-right text-sm text-gray-900 font-mono">{formatMoney(row.current)}</td>
+                          <td className="py-3 px-6 text-right text-sm text-gray-900 font-mono">{formatMoney(row['0'])}</td>
+                          <td className="py-3 px-6 text-right text-sm text-gray-900 font-mono">{formatMoney(row['1'])}</td>
+                          <td className="py-3 px-6 text-right text-sm text-gray-900 font-mono">{formatMoney(row['2'])}</td>
+                          <td className="py-3 px-6 text-right text-sm text-gray-900 font-mono">{formatMoney(row['3'])}</td>
+                          <td className="py-3 px-6 text-right text-sm text-gray-900 font-mono font-medium">{formatMoney(row.total)}</td>
+                        </tr>
+                      ))}
+                    </tbody>
+                  </table>
+                </div>
+              </div>
+            )}
           </div>
         )}
       </div>
