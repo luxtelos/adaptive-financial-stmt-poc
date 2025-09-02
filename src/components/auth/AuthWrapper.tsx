@@ -1,7 +1,5 @@
 import React from 'react'
-import { SignIn, SignUp, useUser, RedirectToSignIn } from '@clerk/clerk-react'
-import { Card, CardContent, CardDescription, CardHeader, CardTitle } from '../ui/card'
-import { Button } from '../ui/button'
+import { useUser, RedirectToSignIn } from '@clerk/clerk-react'
 import { Spinner } from '../ui/spinner'
 
 interface AuthWrapperProps {
