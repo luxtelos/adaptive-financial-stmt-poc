@@ -18,7 +18,6 @@ const EULA: React.FC = () => {
         </div>
       </div>
 
-      <Footer />
     </div>
   );
 };

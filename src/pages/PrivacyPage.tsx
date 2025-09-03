@@ -150,8 +150,6 @@ const Privacy: React.FC = () => {
         </div>
       </div>
       </div>
-
-      <Footer />
     </div>
   );
 };
