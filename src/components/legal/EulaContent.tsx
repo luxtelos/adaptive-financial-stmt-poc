@@ -10,9 +10,7 @@ const EulaContent: React.FC<EulaContentProps> = ({
   className = "space-y-6 text-gray-700" 
 }) => {
   const HeadingComponent = headingLevel;
-  const headingClasses = headingLevel === 'h2' 
-    ? "text-xl font-semibold text-gray-900 mb-3"
-    : "text-xl font-semibold text-gray-900 mb-3";
+  const headingClasses = "text-xl font-semibold text-gray-900 mb-3";
 
   return (
     <div className={className}>
