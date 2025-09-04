@@ -1,6 +1,5 @@
 import React from "react";
 import {Header} from "../components/layout/Header";
-import Footer from "../components/ui/Footer";
 import EulaContent from '../components/legal/EulaContent';
 
 const EULA: React.FC = () => {

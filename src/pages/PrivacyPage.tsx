@@ -1,6 +1,5 @@
 import React from "react";
 import {Header} from "../components/layout/Header";
-import Footer from "../components/ui/Footer";
 
 const Privacy: React.FC = () => {
   return (
