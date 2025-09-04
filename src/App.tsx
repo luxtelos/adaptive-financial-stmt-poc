@@ -1,4 +1,4 @@
-import React, { lazy, Suspense } from 'react'
+import { lazy, Suspense } from 'react'
 import { BrowserRouter as Router, Routes, Route, Navigate, useNavigate } from 'react-router-dom'
 import { Card, CardContent, CardDescription, CardHeader, CardTitle } from './components/ui/card'
 import { Button } from './components/ui/button'
@@ -11,6 +11,14 @@ import { clerkConfig } from './config/clerk'
 import { SignInPage } from './pages/SignInPage'
 import { SignUpPage } from './pages/SignUpPage'
 import { OAuthCallbackPage } from './pages/OAuthCallbackPage'
+import EulaPage from './pages/EulaPage'
+import PrivacyPage from './pages/PrivacyPage'
+import EulaAgreementPage from './pages/EulaAgreementPage'
+import { useEulaAwareAuth } from './hooks/useEulaAwareAuth'
+import EulaModal from './components/legal/EulaModal'
+import { Header } from './components/layout/Header'
+import Footer from './components/ui/Footer'
+
 
 // Lazy load components that require authentication or external services
 const AuthenticatedApp = lazy(() => import('./components/AuthenticatedApp'))
@@ -18,6 +26,15 @@ const AuthenticatedApp = lazy(() => import('./components/AuthenticatedApp'))
 // Landing Page Component (No external dependencies)
 function LandingPage() {
   const navigate = useNavigate()
+  const {
+    showEulaModal,
+    isProcessing,
+    eulaChecked,
+    handleGetStarted,
+    handleEulaAgree,
+    handleEulaDisagree,
+    handleEulaClose,
+  } = useEulaAwareAuth()
 
   // Check if app is configured (but don't initialize services)
   const checkConfiguration = () => {
@@ -33,12 +50,14 @@ function LandingPage() {
     return isConfigured
   }
 
-  const handleGetStarted = () => {
-    if (checkConfiguration()) {
-      navigate('/sign-in')
-    } else {
+  const handleGetStartedClick = () => {
+    if (!checkConfiguration()) {
       navigate('/setup')
+      return
     }
+    
+    // Use the EULA-aware get started handler
+    handleGetStarted()
   }
 
   // Default Landing Page
@@ -66,16 +85,18 @@ function LandingPage() {
             <div className="flex flex-col sm:flex-row gap-4 justify-center">
               <Button 
                 size="lg"
-                onClick={handleGetStarted}
+                onClick={handleGetStartedClick}
                 className="px-8"
+                disabled={isProcessing || !eulaChecked}
               >
-                Get Started
+                {isProcessing ? 'Processing...' : !eulaChecked ? 'Loading...' : 'Get Started'}
               </Button>
               <Button 
                 size="lg"
                 variant="outline"
                 onClick={() => navigate('/demo')}
                 className="px-8"
+                disabled={isProcessing}
               >
                 Try Demo
               </Button>
@@ -127,6 +148,14 @@ function LandingPage() {
           </Card>
         </div>
       </div>
+      
+      {/* EULA Modal */}
+      <EulaModal
+        isOpen={showEulaModal}
+        onAgree={handleEulaAgree}
+        onDisagree={handleEulaDisagree}
+        onClose={handleEulaClose}
+      />
     </div>
   )
 }
@@ -280,62 +309,87 @@ function DemoMode() {
 
 // Main App Component
 function App() {
-  const clerkPubKey = clerkConfig.publishableKey
-  const isConfigured = clerkPubKey && clerkPubKey !== 'pk_test_your_clerk_publishable_key'
+  const clerkPubKey = clerkConfig.publishableKey;
+  const isConfigured = clerkPubKey && clerkPubKey !== "pk_test_your_clerk_publishable_key";
+
+  const AppLayout = ({ children }: { children: React.ReactNode }) => (
+    <div className="flex flex-col min-h-screen">
+      <main className="flex-grow">{children}</main>
+      <Footer />
+    </div>
+  );
 
   if (!isConfigured) {
-    // If Clerk is not configured, show a simple router with setup instructions
+    // If Clerk is NOT configured
     return (
       <Router>
-        <Routes>
-          <Route path="/" element={<LandingPage />} />
-          <Route path="/setup" element={<SetupGuide />} />
-          <Route path="/demo" element={<DemoMode />} />
-          <Route path="*" element={<Navigate to="/" replace />} />
-        </Routes>
+        <AppLayout>
+          <Routes>
+            <Route path="/" element={<LandingPage />} />
+            <Route path="/setup" element={<SetupGuide />} />
+            <Route path="/demo" element={<DemoMode />} />
+            <Route path="/eula" element={<EulaPage />} />
+            <Route path="/privacy" element={<PrivacyPage />} />
+            <Route path="/eula-agreement" element={<EulaAgreementPage />} />
+            <Route path="*" element={<Navigate to="/" replace />} />
+          </Routes>
+        </AppLayout>
         <Toaster />
       </Router>
-    )
+    );
   }
 
-  // If Clerk is configured, wrap everything in ClerkProvider
+  //  If Clerk IS configured
   return (
     <Router>
-      <ClerkProvider 
-        publishableKey={clerkPubKey} 
+      <ClerkProvider
+        publishableKey={clerkPubKey}
         appearance={clerkConfig.appearance}
         signInUrl="/sign-in"
         signUpUrl="/sign-up"
         signInFallbackRedirectUrl="/dashboard"
         signUpFallbackRedirectUrl="/dashboard"
       >
-        <Routes>
-          <Route path="/" element={<LandingPage />} />
-          <Route path="/setup" element={<SetupGuide />} />
-          <Route path="/demo" element={<DemoMode />} />
-          <Route path="/sign-in" element={<SignInPage />} />
-          <Route path="/sign-up" element={<SignUpPage />} />
-          <Route path="/dashboard/*" element={
-            <Suspense fallback={
-              <div className="min-h-screen bg-gradient-to-br from-blue-50 to-indigo-100 flex items-center justify-center">
-                <Spinner size="xl" />
-              </div>
-            }>
-              <AuthenticatedApp />
-            </Suspense>
-          } />
-          <Route path="/oauth-callback" element={<OAuthCallbackPage />} />
-          <Route path="/callback" element={
-            <Suspense fallback={<Spinner size="xl" />}>
-              <AuthenticatedApp />
-            </Suspense>
-          } />
-          <Route path="*" element={<Navigate to="/" replace />} />
-        </Routes>
+        <AppLayout>
+          <Routes>
+            <Route path="/" element={<LandingPage />} />
+            <Route path="/setup" element={<SetupGuide />} />
+            <Route path="/demo" element={<DemoMode />} />
+            <Route path="/eula" element={<EulaPage />} />
+            <Route path="/privacy" element={<PrivacyPage />} />
+            <Route path="/eula-agreement" element={<EulaAgreementPage />} />
+            <Route path="/sign-in" element={<SignInPage />} />
+            <Route path="/sign-up" element={<SignUpPage />} />
+            <Route
+              path="/dashboard/*"
+              element={
+                <Suspense
+                  fallback={
+                    <div className="min-h-screen bg-gradient-to-br from-blue-50 to-indigo-100 flex items-center justify-center">
+                      <Spinner size="xl" />
+                    </div>
+                  }
+                >
+                  <AuthenticatedApp />
+                </Suspense>
+              }
+            />
+            <Route path="/oauth-callback" element={<OAuthCallbackPage />} />
+            <Route
+              path="/callback"
+              element={
+                <Suspense fallback={<Spinner size="xl" />}>
+                  <AuthenticatedApp />
+                </Suspense>
+              }
+            />
+            <Route path="*" element={<Navigate to="/" replace />} />
+          </Routes>
+        </AppLayout>
       </ClerkProvider>
       <Toaster />
     </Router>
-  )
+  );
 }
 
 export default App
