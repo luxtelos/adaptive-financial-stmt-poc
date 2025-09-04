@@ -19,6 +19,7 @@ import EulaModal from './components/legal/EulaModal'
 import { Header } from './components/layout/Header'
 import Footer from './components/ui/Footer'
 
+
 // Lazy load components that require authentication or external services
 const AuthenticatedApp = lazy(() => import('./components/AuthenticatedApp'))
 
