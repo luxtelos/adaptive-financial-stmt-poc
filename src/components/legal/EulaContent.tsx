@@ -4,6 +4,8 @@ interface EulaContentProps {
   headingLevel?: 'h2' | 'h3';
   className?: string;
 }
+// last Updated Date Constant 
+const EULA_LAST_UPDATE = "September 2, 2025";
 
 const EulaContent: React.FC<EulaContentProps> = ({ 
   headingLevel = 'h3', 
@@ -261,7 +263,7 @@ const EulaContent: React.FC<EulaContentProps> = ({
 
       <div className="mt-8 pt-6 border-t border-gray-200">
         <p className="text-sm text-gray-500">
-            Last updated: {new Date().toLocaleDateString()}
+            Last updated: {EULA_LAST_UPDATE}
         </p>
       </div>
     </div>
